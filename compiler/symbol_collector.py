@@ -1,5 +1,5 @@
 """
-recolector de simbolos (persona 1). recorre el ast propio y arma la tabla de simbolos
+recolector de simbolos, parte del frontend. recorre el ast propio y arma la tabla de simbolos
 en tres pasadas, todas dentro de un solo objeto SymbolCollector:
 
   fase 0 (predeclaracion): registra nombres de clases y funciones TOP-LEVEL antes de
@@ -273,7 +273,7 @@ class SymbolCollector:
     def _visit_method(self, cls: ClassSymbol | None, node: FunctionDecl) -> None:
         with self.symbols.push(ScopeKind.FUNCTION, f"function:{node.name}", node.line, node.column):
             if cls is not None:
-                # 'this' se resuelve como cualquier variable -- cero codigo especial en persona 2
+                # 'this' se resuelve como cualquier variable -- cero codigo especial en la semantica core
                 self.symbols.declare(VariableSymbol(
                     name=THIS_NAME, line=node.line, column=node.column,
                     type=ClassType(cls.name), is_const=True, is_implicit=True, initialized=True,
@@ -332,7 +332,7 @@ class SymbolCollector:
         self._visit_expr(node.iterable)
         with self.symbols.push(ScopeKind.LOOP, "loop", node.line, node.column):
             # el tipo se deja en None a proposito: resolverlo requiere tipar 'iterable',
-            # que es responsabilidad de persona 2. unico simbolo con tipo diferido de persona 1.
+            # responsabilidad de la semantica core. unico simbolo con tipo diferido del frontend.
             self.symbols.declare(VariableSymbol(
                 name=node.var_name, line=node.line, column=node.column,
                 type=None, is_iteration_var=True, initialized=True,
@@ -401,7 +401,7 @@ class SymbolCollector:
 
     # ------------------------------------------------------------------
     # expresiones: solo se recorren para encontrar 'this' fuera de contexto y
-    # para no dejar sub-arboles sin visitar. persona 2 hace el chequeo de tipos real.
+    # para no dejar sub-arboles sin visitar. la semantica core hace el chequeo de tipos real.
     # ------------------------------------------------------------------
 
     def _visit_expr(self, node) -> None:
@@ -441,8 +441,8 @@ class SymbolCollector:
             for el in node.elements:
                 self._visit_expr(el)
         # Identifier / IntegerLiteral / StringLiteral / BooleanLiteral / NullLiteral:
-        # nada que resolver en persona 1, el lookup de identificadores en expresiones
-        # es responsabilidad de persona 2 (frontera explicita, ver CPS-023 en el catalogo)
+        # nada que resolver en el frontend, el lookup de identificadores en expresiones
+        # es responsabilidad de la semantica core (frontera explicita, ver CPS-023 en el catalogo)
 
 
 def collect_symbols(program: Program, diagnostics: DiagnosticBag) -> SymbolTable:

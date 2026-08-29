@@ -1,12 +1,12 @@
 # Compiscript — Analizador Semántico
 
 Proyecto de Construcción de Compiladores: analizador semántico para Compiscript
-(subconjunto de TypeScript), en Python 3 + ANTLR4. Trabajo dividido en 3 personas
-con dependencia secuencial (ver `docs/temp/` para la división de trabajo completa).
+(subconjunto de TypeScript), en Python 3 + ANTLR4. El trabajo está dividido en
+etapas con dependencia secuencial (ver `docs/temp/` para la división completa).
 
-**Este README documenta la parte de Persona 1** (frontend: parser, AST, tipos, tabla
-de símbolos). Las secciones de Persona 2 y Persona 3 se agregan cuando esas fases
-del proyecto arrancan.
+**Este README documenta el frontend** (parser, AST, tipos, tabla de símbolos).
+Las secciones de semántica core y de integración/IDE se agregan cuando esas
+etapas del proyecto arrancan.
 
 ## Requisitos
 
@@ -58,15 +58,15 @@ y el jar usado para generar **deben coincidir exactamente en versión** (4.13.1)
 ANTLR lo valida en tiempo de ejecución y falla ruidosamente si no coinciden — es la
 causa de fallo #1 si algo no arranca.
 
-## Ejecutar tests de Persona 1
+## Ejecutar tests del frontend
 
 ```bash
-pytest tests/person1 -v
+pytest tests/frontend -v
 ```
 
 Ningún test usa `pytest.skip`: si `compiler/generated/` no existe o el import falla,
-el test de gramática falla directamente (es criterio de aceptación de Gate A, no un
-detalle opcional).
+el test de gramática falla directamente (no es un detalle opcional, sino una condición
+que debe cumplirse siempre).
 
 ## Contrato congelado: `frontend.analyze_source`
 
@@ -89,7 +89,7 @@ result = analyze_source(source: str) -> FrontendResult(ast, symbols, diagnostics
 Esta API **no cambia de forma** — está protegida por un test de introspección
 (`test_frontend.py::test_frontend_result_tiene_exactamente_los_atributos_del_pdf`).
 
-## Catálogo de diagnósticos (`CPS-0xx`, propiedad de Persona 1)
+## Catálogo de diagnósticos (`CPS-0xx`, del frontend)
 
 | Código | Severidad | Significado |
 |---|---|---|
@@ -113,9 +113,9 @@ Esta API **no cambia de forma** — está protegida por un test de introspecció
 | CPS-033 | warning | un atributo oculta uno heredado |
 | CPS-040 | error | `this` usado fuera de un método o constructor |
 
-Rango reservado: `CPS-0xx` es de Persona 1, `CPS-1xx` de Persona 2 (tipos),
-`CPS-2xx` de Persona 3 (integración/IDE). Un test (`test_diagnostics.py`) impide
-que un código de Persona 1 se salga de su rango.
+Rango reservado: `CPS-0xx` es del frontend, `CPS-1xx` queda para la semántica core
+(tipos), `CPS-2xx` para integración/IDE. Un test (`test_diagnostics.py`) impide
+que un código del frontend se salga de su rango.
 
 ## Decisiones de diseño relevantes
 
@@ -141,22 +141,23 @@ que un código de Persona 1 se salga de su rango.
 - **Strings sin escapes.** La gramática no define secuencias de escape
   (`~["\r\n]*`), así que `"a\nb"` se guarda literal, no se interpreta `\n`.
 
-## Fronteras con Persona 2 y Persona 3
+## Fronteras con las siguientes etapas (semántica core / integración)
 
-- Cada nodo `Expr` trae `inferred_type: Type | None = None`. Persona 1 **nunca**
-  lo escribe — es el campo que Persona 2 rellena in-place durante el chequeo de tipos.
+- Cada nodo `Expr` trae `inferred_type: Type | None = None`. El frontend **nunca**
+  lo escribe — es el campo que la etapa de semántica core rellena in-place durante
+  el chequeo de tipos.
 - El uso general de identificadores dentro de expresiones (`x` sin declarar en
-  `x + 1`) **no** lo valida Persona 1 — es de Persona 2. Persona 1 solo valida
-  nombres de clase en `new`/herencia (`CPS-023`), porque es estructura de símbolos,
-  no resolución de expresiones.
+  `x + 1`) **no** lo valida el frontend — le corresponde a la semántica core. El
+  frontend solo valida nombres de clase en `new`/herencia (`CPS-023`), porque es
+  estructura de símbolos, no resolución de expresiones.
 - El tipo de la variable de iteración de un `foreach` queda en `None` — requiere
-  tipar la colección, que es de Persona 2.
+  tipar la colección, responsabilidad de la etapa siguiente.
 - `types.py` no depende de `symbols.py` ni de `ast_nodes.py` (verificado por
   `test_architecture.py`). `is_assignable` y `common_type` aceptan un parámetro
   opcional `hierarchy` para hacer subtipado nominal cuando quien los llama tiene
   acceso a la tabla de clases.
 
-## Estructura del proyecto (Persona 1)
+## Estructura del proyecto (frontend)
 
 ```
 program/
@@ -176,7 +177,7 @@ tools/
   generate_antlr.ps1 / .sh     # regenera el parser, con verificación de integridad
 docker/
   Dockerfile.antlr              # fallback sin java local
-tests/person1/
+tests/frontend/
   fixtures/{valid,invalid}/*.cps
   test_*.py
 ```

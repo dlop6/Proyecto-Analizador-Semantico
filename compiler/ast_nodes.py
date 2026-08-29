@@ -1,15 +1,15 @@
 """
-catalogo del ast propio de compiscript (persona 1). cobertura total: incluye
+catalogo del ast propio de compiscript, parte del frontend. cobertura total: incluye
 try/catch, foreach y print aunque el pdf no se los asigne a nadie explicitamente.
 
 decisiones clave (ver plan):
 - slots=True: si alguien escribe mal un atributo (typo tipo "infered_type") explota
-  en vez de fallar callado. importa mucho en un proyecto de tres personas.
+  en vez de fallar callado. importa mucho en un proyecto con varias etapas.
 - kw_only=True: evita el problema clasico de dataclasses con herencia + defaults
   (un campo sin default no puede ir despues de uno con default). construyendo todo
   por keyword se elimina ese problema de raiz.
-- los nodos NO son frozen (persona 2 rellena inferred_type in-place). los tipos
-  de types.py si son frozen. son cosas distintas a proposito.
+- los nodos NO son frozen (la semantica core rellena inferred_type in-place). los
+  tipos de types.py si son frozen. son cosas distintas a proposito.
 - line/column viven en la base Node, siempre 1-based (normalizado en ast_builder).
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ class Node:
 
 @dataclass(slots=True, kw_only=True)
 class Expr(Node):
-    # contrato con persona 2: aca siempre queda en None, persona 1 nunca lo escribe
+    # contrato con la semantica core: aca siempre queda en None, el frontend nunca lo escribe
     inferred_type: Type | None = None
 
 
@@ -288,7 +288,7 @@ class ErrorExpr(Expr):
 class AstVisitor:
     """
     visitor base para recorrer el ast propio. usa un diccionario tipo->callable en vez
-    de singledispatchmethod (mas explicito, sin sorpresas con slots). persona 2 y persona 3
+    de singledispatchmethod (mas explicito, sin sorpresas con slots). las etapas siguientes
     solo sobreescriben lo que les importa, generic_visit se encarga del resto (ocp).
     """
 

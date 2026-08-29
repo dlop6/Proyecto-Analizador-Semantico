@@ -1,7 +1,7 @@
 """
 tests de compiler/symbol_collector.py: predeclaracion, duplicados, scopes de cada
 construccion (for/foreach/switch/catch), this, herencia circular y constructor.
-el bloque mas grande de persona 1, cubre las secciones D, E y H del plan.
+el bloque mas grande del frontend, cubre las secciones D, E y H del plan.
 """
 from antlr4 import CommonTokenStream, InputStream
 
@@ -122,7 +122,7 @@ def test_scope_del_for_variable_no_visible_fuera():
     table, diag = analyze(
         "for (let i: integer = 0; i < 3; i = i + 1) {} print(i);"
     )
-    # persona 1 no valida identificadores en expresiones (eso es de persona 2),
+    # el frontend no valida identificadores en expresiones (eso es de la semantica core),
     # pero podemos verificar la ESTRUCTURA del arbol de scopes directamente
     scope_names = [s.name for s in table.all_scopes()]
     assert "loop" in scope_names
@@ -142,7 +142,7 @@ def test_foreach_variable_en_loop_scope_tipo_diferido():
     assert list(diag) == []
     loop_scope = next(s for s in table.all_scopes() if s.kind == ScopeKind.LOOP)
     assert "x" in loop_scope.symbols
-    assert loop_scope.symbols["x"].type is None  # contrato: persona 2 lo completa
+    assert loop_scope.symbols["x"].type is None  # contrato: la semantica core lo completa
     assert loop_scope.symbols["x"].is_iteration_var is True
 
 

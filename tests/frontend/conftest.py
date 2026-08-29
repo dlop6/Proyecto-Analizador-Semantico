@@ -1,4 +1,4 @@
-"""fixtures y helpers compartidos para los tests de persona 1."""
+"""fixtures y helpers compartidos para los tests del frontend."""
 from pathlib import Path
 
 import pytest

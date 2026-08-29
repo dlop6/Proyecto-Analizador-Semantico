@@ -54,8 +54,8 @@ def test_ningun_codigo_huerfano_en_el_catalogo():
         assert patron.match(code), f"codigo con formato invalido: {code}"
 
 
-def test_codigos_de_persona1_no_invaden_el_rango_de_otros():
-    # persona 1 es dueño exclusivo de CPS-0xx. CPS-1xx es de persona 2, CPS-2xx de persona 3.
+def test_codigos_del_frontend_no_invaden_el_rango_de_otras_etapas():
+    # el frontend es dueño exclusivo de CPS-0xx. CPS-1xx es de la semantica core, CPS-2xx de integracion.
     for code in _MESSAGES:
         numero = int(code.split("-")[1])
-        assert numero < 100, f"{code} se sale del rango CPS-0xx reservado para persona 1"
+        assert numero < 100, f"{code} se sale del rango CPS-0xx reservado para el frontend"

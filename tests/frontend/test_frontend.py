@@ -1,5 +1,5 @@
 """
-tests de compiler/frontend.py: la fachada congelada que consumen persona 2 y persona 3.
+tests de compiler/frontend.py: la fachada congelada que consumen las etapas siguientes.
 mezcla tests de contrato (introspeccion de la api) con tests de integracion (fuente
 completa -> FrontendResult).
 """

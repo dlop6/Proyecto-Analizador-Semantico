@@ -1,5 +1,5 @@
 """
-arbol de ambitos (scopes) y la tabla de simbolos que lo gestiona (persona 1).
+arbol de ambitos (scopes) y la tabla de simbolos que lo gestiona, parte del frontend.
 
 dos abstracciones separadas a proposito:
 - Scope: estructura pasiva, solo guarda simbolos y sabe resolver nombres subiendo
@@ -113,7 +113,7 @@ class SymbolTable:
         return self.current.lookup(name)
 
     def all_scopes(self) -> Iterator[Scope]:
-        """recorrido pre-order de todo el arbol, para que persona 3 lo pueda dibujar."""
+        """recorrido pre-order de todo el arbol, para que la etapa de integracion lo pueda dibujar."""
         stack = [self.global_scope]
         while stack:
             scope = stack.pop()

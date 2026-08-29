@@ -1,6 +1,6 @@
 """
-fachada de persona 1: encadena lexer -> parser -> ast propio -> tabla de simbolos.
-esta es la API congelada que consumen persona 2 y persona 3, no se le cambia la firma.
+fachada del frontend: encadena lexer -> parser -> ast propio -> tabla de simbolos.
+esta es la API congelada que consumen las etapas siguientes, no se le cambia la firma.
 
 frontend.analyze_source(source) -> FrontendResult(ast, symbols, diagnostics)
 """
@@ -18,7 +18,7 @@ from compiler.scopes import SymbolTable
 from compiler.symbol_collector import collect_symbols
 
 # hardening (owasp asvs / nist sp 800-53 si-10): un limite razonable evita que alguien
-# tire el analizador con una fuente gigante cuando persona 3 lo exponga por flask.
+# tire el analizador con una fuente gigante cuando la etapa de integracion lo exponga por flask.
 MAX_SOURCE_BYTES = 5 * 1024 * 1024  # 5 mib
 
 
@@ -40,7 +40,7 @@ class FrontendResult:
 
 def analyze_source(source: str) -> FrontendResult:
     """
-    punto de entrada congelado de persona 1. sin estado global: cada llamada crea su
+    punto de entrada congelado del frontend. sin estado global: cada llamada crea su
     propia bolsa de diagnosticos y su propia tabla de simbolos, dos llamadas seguidas
     con la misma fuente dan resultados independientes e identicos.
     """

@@ -1,11 +1,11 @@
 """
-manejo de diagnosticos del frontend (persona 1).
+manejo de diagnosticos del frontend.
 
 responsabilidad unica: representar errores/warnings con posicion y coleccionarlos.
 no conoce el ast ni la tabla de simbolos, solo junta lo que le reportan.
 
-rango de codigos reservado para persona 1: CPS-0xx (lexico, sintaxis, ast, simbolos, scopes).
-CPS-1xx queda para persona 2 (tipos) y CPS-2xx para persona 3 (integracion/ide). no se toca eso aca.
+rango de codigos reservado para el frontend: CPS-0xx (lexico, sintaxis, ast, simbolos, scopes).
+CPS-1xx queda para la semantica core (tipos) y CPS-2xx para integracion/ide. no se toca eso aca.
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ class Diagnostic:
     line: int
     column: int
     severity: Severity = Severity.ERROR
-    length: int = 1  # cuanto subrayar, para cuando persona 3 lo pinte en el ide
+    length: int = 1  # cuanto subrayar, para cuando la etapa de integracion lo pinte en el ide
 
 
 class DiagnosticBag:

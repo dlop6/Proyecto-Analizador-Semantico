@@ -1,5 +1,5 @@
 """
-clases de simbolo (persona 1). capa intermedia del proyecto: depende solo de types.py,
+clases de simbolo, parte del frontend. capa intermedia del proyecto: depende solo de types.py,
 no conoce el ast ni los scopes (eso lo arma scopes.py, que si depende de este archivo).
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ THIS_NAME = "this"
 
 # compiscript no tiene tipos de excepcion propios (no hay throw en la gramatica).
 # se le da string a la variable del catch para que al menos se pueda hacer print(e).
-# aislado aca por si persona 2 quiere cambiar esta convencion despues.
+# aislado aca por si la semantica core quiere cambiar esta convencion despues.
 CATCH_VAR_TYPE = STRING
 
 
@@ -32,7 +32,7 @@ class Symbol:
     line: int
     column: int
     type: Type | None = None
-    scope_name: str = ""  # nombre legible del scope donde vive, util para reportes de persona 3
+    scope_name: str = ""  # nombre legible del scope donde vive, util para reportes de la etapa de integracion
 
 
 @dataclass
