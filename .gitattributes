@@ -1,0 +1,2 @@
+# lo que genera antlr no lo escribimos nosotros, que github lo colapse en los diffs
+compiler/generated/** linguist-generated=true

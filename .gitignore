@@ -1,0 +1,11 @@
+# el jar pesa como 2mb y se descarga con checksum, no hace falta versionarlo
+tools/*.jar
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.coverage
+htmlcov/

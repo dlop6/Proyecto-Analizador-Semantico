@@ -1,0 +1,24 @@
+# fallback para regenerar el parser cuando no hay java local.
+# replica el flujo oficial del curso (antlr -Dlanguage=Python3 Compiscript.g4)
+# uso: docker build -f docker/Dockerfile.antlr -t compiscript-antlr .
+#      docker run --rm -v "$(pwd)/program:/work/program" -v "$(pwd)/compiler/generated:/work/out" compiscript-antlr
+FROM eclipse-temurin:17-jre-jammy
+
+ARG ANTLR_VERSION=4.13.1
+ARG ANTLR_SHA256=bc13a9c57a8dd7d5196888211e5ede657cb64a3ce968608697e4f668251a8487
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -sSL -o /opt/antlr.jar "https://www.antlr.org/download/antlr-${ANTLR_VERSION}-complete.jar" \
+    && echo "${ANTLR_SHA256}  /opt/antlr.jar" | sha256sum -c -
+
+# usuario sin privilegios, principio de minimo privilegio
+RUN useradd --no-create-home --uid 1001 antlruser
+USER antlruser
+
+WORKDIR /work
+
+ENTRYPOINT ["java", "-Xmx500M", "-cp", "/opt/antlr.jar", "org.antlr.v4.Tool", \
+            "-Dlanguage=Python3", "-visitor", "-no-listener", "-o", "/work/out"]
+CMD ["/work/program/Compiscript.g4"]

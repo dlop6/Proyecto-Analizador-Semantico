@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+# asi pytest encuentra el paquete compiler sin necesidad de instalarlo
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+# lo generado por antlr no cuenta para cobertura, no lo escribimos a mano
+omit = ["compiler/generated/*"]
