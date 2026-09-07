@@ -15,6 +15,7 @@ import graphviz
 from compiler import core_semantics, extended_semantics, frontend
 from compiler.ast_visualizer import render_svg
 from compiler.diagnostics import Diagnostic
+from compiler.scopes import SymbolTable
 
 # excepciones puntuales que graphviz.Digraph.pipe() puede lanzar cuando el binario 'dot'
 # no esta instalado o falla -- no se captura Exception a secas para no esconder bugs
@@ -24,10 +25,15 @@ _GRAPHVIZ_ERRORS = (graphviz.ExecutableNotFound, graphviz.CalledProcessError)
 
 @dataclass(frozen=True, slots=True)
 class CompilationResult:
-    """contrato que consume el ide: exito, diagnosticos de todo el pipeline, svg del ast."""
+    """
+    contrato que consume el ide: exito, diagnosticos de todo el pipeline, svg del ast,
+    y la tabla de simbolos completa (arbol de scopes) para que la ui pueda mostrar
+    insercion/recuperacion/actualizacion/manejo de ambitos, no solo explicarlo de palabra.
+    """
     success: bool
     diagnostics: list[Diagnostic]
     ast_svg: str | None
+    symbols: SymbolTable
 
 
 def compile_source(source: str) -> CompilationResult:
@@ -52,4 +58,5 @@ def compile_source(source: str) -> CompilationResult:
         success=extended_result.ast is not None and not extended_result.has_errors,
         diagnostics=extended_result.diagnostics,
         ast_svg=ast_svg,
+        symbols=extended_result.symbols,
     )

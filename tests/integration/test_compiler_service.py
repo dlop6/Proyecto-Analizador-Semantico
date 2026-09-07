@@ -15,8 +15,10 @@ PROGRAM_DIR = Path(__file__).resolve().parents[2] / "program"
 # ---------- contrato ----------
 
 def test_compilation_result_tiene_exactamente_los_campos_esperados():
+    # symbols se agrego para que el ide pueda mostrar la tabla de simbolos completa
+    # (insercion/recuperacion/actualizacion/manejo de ambitos), no solo explicarla.
     field_names = {f.name for f in dataclasses.fields(CompilationResult)}
-    assert field_names == {"success", "diagnostics", "ast_svg"}
+    assert field_names == {"success", "diagnostics", "ast_svg", "symbols"}
 
 
 # ---------- programa valido de punta a punta ----------

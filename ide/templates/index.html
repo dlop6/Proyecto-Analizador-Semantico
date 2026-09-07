@@ -50,7 +50,10 @@ print(x);
 
     <section id="ast-pane">
       <div class="panel-heading">
-        <h2>AST</h2>
+        <div id="view-tabs" class="view-tabs" role="tablist" aria-label="Vista del análisis">
+          <button type="button" class="tab-btn active" data-view="ast" role="tab" aria-selected="true" aria-controls="ast-container">AST</button>
+          <button type="button" class="tab-btn" data-view="symbols" role="tab" aria-selected="false" aria-controls="symbols-container">Símbolos</button>
+        </div>
         <div id="ast-controls" class="ast-controls" role="group" aria-label="Controles del AST">
           <button id="ast-zoom-out" type="button" aria-label="Reducir AST" title="Reducir AST" disabled>&minus;</button>
           <button id="ast-zoom-in" type="button" aria-label="Ampliar AST" title="Ampliar AST" disabled>+</button>
@@ -59,7 +62,8 @@ print(x);
           <button id="ast-download" type="button" aria-label="Descargar AST como SVG" title="Descargar SVG" disabled>SVG</button>
         </div>
       </div>
-      <div id="ast-container"><p class="hint">Compilá para generar el árbol.</p></div>
+      <div id="ast-container" role="tabpanel" aria-labelledby="ast-tab"><p class="hint">Compilá para generar el árbol.</p></div>
+      <div id="symbols-container" role="tabpanel" aria-labelledby="symbols-tab" hidden><p class="hint">Compilá para ver los símbolos y sus ámbitos.</p></div>
     </section>
   </main>
 

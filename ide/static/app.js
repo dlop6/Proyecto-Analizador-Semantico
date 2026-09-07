@@ -13,6 +13,9 @@
   const copyBtnEl = document.getElementById("copy-diagnostics-btn");
   const copyStatusEl = document.getElementById("copy-status");
   const astEl = document.getElementById("ast-container");
+  const symbolsEl = document.getElementById("symbols-container");
+  const viewTabsEl = document.getElementById("view-tabs");
+  const astControlsGroupEl = document.getElementById("ast-controls");
   const btnEl = document.getElementById("compile-btn");
   const fileEl = document.getElementById("source-file");
   const fileNameEl = document.getElementById("file-name");
@@ -44,6 +47,7 @@
   let currentAstSvg = null;
   let astScale = 1;
   let astDimensions = null;
+  let activeView = "ast";
 
   function createTextNode(text, className) {
     if (!className) return document.createTextNode(text);
@@ -199,6 +203,21 @@
     }
   }
 
+  // AST y tabla de símbolos comparten la 3ra columna como pestañas: solo uno de
+  // los dos paneles está visible a la vez, y los controles de zoom del AST solo
+  // tienen sentido cuando esa pestaña está activa.
+  function setActiveView(view) {
+    activeView = view;
+    astEl.hidden = view !== "ast";
+    symbolsEl.hidden = view !== "symbols";
+    astControlsGroupEl.hidden = view !== "ast";
+    for (const button of viewTabsEl.querySelectorAll("button[data-view]")) {
+      const active = button.dataset.view === view;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    }
+  }
+
   function clearResult() {
     currentDiagnostics = [];
     activeFilter = "all";
@@ -209,6 +228,7 @@
     copyBtnEl.disabled = true;
     updateFilterButtons();
     setAstEmpty("Compilá para generar el árbol.");
+    renderSymbols(null);
   }
 
   function diagnosticKey(diag) {
@@ -325,6 +345,98 @@
       : "El análisis terminó, pero Graphviz no está disponible para generar el AST.");
   }
 
+  // representación mínima de un símbolo: nombre, tipo y detalle según su categoría
+  // (variable/función/clase). todo por textContent, nunca por innerHTML con datos
+  // del servidor -- misma garantía que ya aplica al resto del ide.
+  function buildSymbolItem(symbol) {
+    const item = document.createElement("li");
+    item.className = `symbol-item kind-${symbol.kind}`;
+
+    const name = document.createElement("span");
+    name.className = "symbol-name";
+    name.textContent = symbol.name;
+    item.appendChild(name);
+
+    if (symbol.kind === "function") {
+      const signature = document.createElement("span");
+      signature.className = "symbol-type";
+      const params = symbol.params.join(", ");
+      const returnType = symbol.return_type ? `: ${symbol.return_type}` : "";
+      signature.textContent = `(${params})${returnType}`;
+      item.appendChild(signature);
+      if (symbol.is_constructor) item.appendChild(buildFlag("constructor"));
+    } else if (symbol.kind === "class") {
+      if (symbol.parent_name) {
+        const parent = document.createElement("span");
+        parent.className = "symbol-type";
+        parent.textContent = `: ${symbol.parent_name}`;
+        item.appendChild(parent);
+      }
+    } else {
+      if (symbol.type) {
+        const type = document.createElement("span");
+        type.className = "symbol-type";
+        type.textContent = `: ${symbol.type}`;
+        item.appendChild(type);
+      }
+      if (symbol.is_const) item.appendChild(buildFlag("const"));
+      if (symbol.is_param) item.appendChild(buildFlag("param"));
+    }
+
+    if (symbol.kind === "class" && (symbol.fields.length || symbol.methods.length)) {
+      const members = document.createElement("ul");
+      members.className = "symbol-list class-members";
+      for (const field of symbol.fields) members.appendChild(buildSymbolItem(field));
+      for (const method of symbol.methods) members.appendChild(buildSymbolItem(method));
+      item.appendChild(members);
+    }
+    return item;
+  }
+
+  function buildFlag(text) {
+    const flag = document.createElement("span");
+    flag.className = "symbol-flag";
+    flag.textContent = text;
+    return flag;
+  }
+
+  // un nodo del árbol de scopes (Scope.kind/name/symbols/children ya serializados
+  // por ide/app.py): sus símbolos propios como lista, y sus hijos anidados debajo.
+  function buildScopeNode(scope) {
+    const node = document.createElement("div");
+    node.className = "scope-node";
+
+    const header = document.createElement("div");
+    header.className = "scope-header";
+    const kind = document.createElement("span");
+    kind.className = "scope-kind";
+    kind.textContent = scope.kind;
+    const name = document.createElement("span");
+    name.textContent = scope.name;
+    header.append(kind, name);
+    node.appendChild(header);
+
+    if (scope.symbols.length) {
+      const list = document.createElement("ul");
+      list.className = "symbol-list";
+      for (const symbol of scope.symbols) list.appendChild(buildSymbolItem(symbol));
+      node.appendChild(list);
+    }
+    for (const child of scope.children) node.appendChild(buildScopeNode(child));
+    return node;
+  }
+
+  function renderSymbols(symbolTable) {
+    if (!symbolTable) {
+      symbolsEl.replaceChildren(Object.assign(document.createElement("p"), {
+        className: "hint",
+        textContent: "No hay tabla de símbolos disponible para esta solicitud.",
+      }));
+      return;
+    }
+    symbolsEl.replaceChildren(buildScopeNode(symbolTable));
+  }
+
   function renderResult(data) {
     if (data.error) {
       currentDiagnostics = [];
@@ -332,6 +444,7 @@
       copyBtnEl.disabled = true;
       setStatus(data.error, "fail");
       setAstEmpty("No hay AST disponible para esta solicitud.");
+      renderSymbols(null);
       return;
     }
     currentDiagnostics = Array.isArray(data.diagnostics) ? data.diagnostics : [];
@@ -346,6 +459,7 @@
     setCopyStatus("", "");
     renderDiagnostics();
     renderAstResult(data);
+    renderSymbols(data.symbols);
   }
 
   function diagnosticsText() {
@@ -415,6 +529,7 @@
     } catch (_error) {
       setStatus("No se pudo compilar: respuesta inválida o error de red.", "fail");
       setAstEmpty("No hay AST disponible mientras no haya una respuesta válida.");
+      renderSymbols(null);
     } finally {
       compiling = false;
       btnEl.disabled = false;
@@ -445,6 +560,11 @@
     renderDiagnostics();
   });
   copyBtnEl.addEventListener("click", copyDiagnostics);
+  viewTabsEl.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-view]");
+    if (!button) return;
+    setActiveView(button.dataset.view);
+  });
   astZoomInEl.addEventListener("click", () => changeAstScale(0.1));
   astZoomOutEl.addEventListener("click", () => changeAstScale(-0.1));
   astResetEl.addEventListener("click", () => { astScale = 1; applyAstScale(); });
@@ -462,5 +582,6 @@
 
   renderEditor();
   refreshFileName();
+  setActiveView("ast");
   clearResult();
 })();
