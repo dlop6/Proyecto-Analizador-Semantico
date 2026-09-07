@@ -177,10 +177,18 @@ class AstBuilder(CompiscriptVisitor):
             # visitAssignment devuelve un ExprStatement envolviendo la Assignment, sacamos la de adentro
             init = self.visit(ctx.assignment()).expression
         exprs = ctx.expression()
-        # segun cuantos () esten presentes, la condicion y el update pueden faltar. la gramatica es
-        # 'for' '(' (varDecl|assignment|';') expression? ';' expression? ')' block
-        condition = self.visit(exprs[0]) if len(exprs) >= 1 else None
-        update = self.visit(exprs[1]) if len(exprs) >= 2 else None
+        # La expresion de actualizacion puede ser la unica presente (for (;; update)).
+        # El ultimo ';' directo del contexto siempre separa condicion y actualizacion;
+        # el ';' de una variable/asignacion de inicializacion vive en un subcontexto.
+        separators = ctx.getTokens(CompiscriptParser.T__4)  # T__4 es ';'
+        split_at = separators[-1].getSymbol().tokenIndex
+        condition = None
+        update = None
+        for expr_ctx in exprs:
+            if expr_ctx.start.tokenIndex < split_at:
+                condition = self.visit(expr_ctx)
+            else:
+                update = self.visit(expr_ctx)
         body = self.visit(ctx.block())
         return ForStatement(line=line, column=col, init=init, condition=condition, update=update, body=body)
 

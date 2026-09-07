@@ -34,7 +34,7 @@ from compiler.function_rules import ReturnTracker, check_call, check_return, fin
 from compiler.scopes import Scope, SymbolTable
 from compiler.symbols import ClassSymbol, FunctionSymbol, VariableSymbol
 from compiler.types import (
-    ArrayType, BOOLEAN, ClassHierarchy, ERROR, INTEGER, NULL, STRING, Type,
+    ArrayType, BOOLEAN, ClassHierarchy, ERROR, ErrorType, INTEGER, NULL, STRING, Type,
     is_assignable,
 )
 
@@ -88,6 +88,14 @@ class _ClassHierarchyView:
             cls = cls.parent
         return False
 
+    def ancestors(self, name: str) -> list[str]:
+        result: list[str] = []
+        cls = self._classes.get(name)
+        while cls is not None:
+            result.append(cls.name)
+            cls = cls.parent
+        return result
+
 
 class _ScopeCursor:
     """context manager liviano: mueve el cursor del visitor a un scope ya existente y lo restaura al salir."""
@@ -127,7 +135,8 @@ class CoreSemanticVisitor(AstVisitor):
         }
         self._hierarchy: ClassHierarchy = _ClassHierarchyView(self._classes)
         self._current_class: ClassSymbol | None = None
-        self._return_stack: list[ReturnTracker] = []
+        self._return_stack: list[ReturnTracker | None] = []
+        self._function_nodes: list[FunctionDecl] = []
 
         self._dispatch = {
             Program: self._visit_program,
@@ -177,6 +186,15 @@ class CoreSemanticVisitor(AstVisitor):
         severity = Severity.WARNING if code in _WARNING_CODES else Severity.ERROR
         self._diag.add(Diagnostic(code=code, message=message, line=line, column=column, severity=severity))
 
+    def _lookup_with_scope(self, name: str) -> tuple[object | None, Scope | None]:
+        scope: Scope | None = self._current
+        while scope is not None:
+            found = scope.lookup_local(name)
+            if found is not None:
+                return found, scope
+            scope = scope.parent
+        return None, None
+
     def _type_of(self, expr: Expr | None) -> Type:
         if expr is None or expr.inferred_type is None:
             return ERROR
@@ -202,6 +220,12 @@ class CoreSemanticVisitor(AstVisitor):
         has_initializer = initializer is not None
         value_type = initializer.inferred_type if has_initializer else None
         if symbol.type is not None:
+            # Una pasada anterior pudo guardar ERROR solo porque un nodo extendido aun
+            # no tenia tipo. La revalidacion posterior puede reemplazarlo por el tipo real.
+            if (isinstance(symbol.type, ErrorType) and value_type is not None
+                    and not isinstance(value_type, ErrorType)):
+                symbol.type = value_type
+                return
             if value_type is not None and not is_assignable(symbol.type, value_type, self._hierarchy):
                 self._emit("CPS-100", line, column, name)
             return
@@ -215,16 +239,11 @@ class CoreSemanticVisitor(AstVisitor):
         resuelve el FunctionSymbol que corresponde a `node`, sin crear ninguno nuevo.
         - metodo: se busca en la clase actual (self._current_class), ya predeclarado por
           symbol_collector en fase 1.
-        - top-level: se busca en el scope global por nombre Y posicion (dos funciones
-          top-level distintas no pueden coincidir en (line, column)).
-        - funcion anidada dentro de otra funcion: symbol_collector no la predeclara como
-          simbolo (limitacion conocida, ver seccion de semantica core en el README) -- se
-          devuelve None y el cuerpo se analiza igual, pero sin poder validar 'return'
-          contra una firma que no existe.
+        - funciones top-level y anidadas: se buscan en el scope contenedor actual.
         """
         if node.is_method:
             return self._current_class.methods.get(node.name) if self._current_class else None
-        found = self._symbols.global_scope.lookup_local(node.name)
+        found = self._current.lookup_local(node.name)
         if isinstance(found, FunctionSymbol) and found.line == node.line and found.column == node.column:
             return found
         return None
@@ -281,12 +300,20 @@ class CoreSemanticVisitor(AstVisitor):
     # ------------------------------------------------------------------
 
     def _visit_identifier(self, node: Identifier) -> None:
-        symbol = self._current.lookup(node.name)
+        symbol, declaring_scope = self._lookup_with_scope(node.name)
         if symbol is None:
             self._emit("CPS-103", node.line, node.column, node.name)
             node.inferred_type = ERROR
             return
         if isinstance(symbol, VariableSymbol):
+            # Las closures basicas solo capturan el entorno que ya existia al
+            # declararse la funcion anidada; no implementamos hoisting de variables.
+            if (len(self._function_nodes) > 1 and declaring_scope is not self._current
+                    and (symbol.line, symbol.column) > (self._function_nodes[-1].line,
+                                                         self._function_nodes[-1].column)):
+                self._emit("CPS-103", node.line, node.column, node.name)
+                node.inferred_type = ERROR
+                return
             node.inferred_type = symbol.type if symbol.type is not None else ERROR
             return
         # nombre de clase o funcion usado como valor: compiscript no tiene funciones ni
@@ -366,22 +393,34 @@ class CoreSemanticVisitor(AstVisitor):
     def _visit_function_decl(self, node: FunctionDecl) -> None:
         function = self._resolve_function_symbol(node)
         with self._enter(node):
-            if function is None:
-                self._check_dead_code(node.body.statements)
-                for stmt in node.body.statements:
-                    self.visit(stmt)
-                return
-            tracker = ReturnTracker(function=function, declared=function.return_type)
-            self._return_stack.append(tracker)
+            self._function_nodes.append(node)
             try:
-                self._check_dead_code(node.body.statements)
-                for stmt in node.body.statements:
-                    self.visit(stmt)
+                if function is None:
+                # Aisla retornos de una funcion cuya firma no pudo resolverse: nunca
+                # deben terminar en el tracker de su funcion exterior.
+                    self._return_stack.append(None)
+                    try:
+                        self._check_dead_code(node.body.statements)
+                        for stmt in node.body.statements:
+                            self.visit(stmt)
+                    finally:
+                        self._return_stack.pop()
+                    return
+            # El valor mutable del simbolo puede ser una inferencia de una pasada previa;
+            # la presencia de anotacion en el AST es la unica fuente de verdad.
+                tracker = ReturnTracker(function=function, declared=function.return_type if node.return_type is not None else None)
+                self._return_stack.append(tracker)
+                try:
+                    self._check_dead_code(node.body.statements)
+                    for stmt in node.body.statements:
+                        self.visit(stmt)
+                finally:
+                    self._return_stack.pop()
+                code = finalize_return_type(tracker, self._hierarchy)
+                if code is not None:
+                    self._emit(code, node.line, node.column, function.name)
             finally:
-                self._return_stack.pop()
-            code = finalize_return_type(tracker, self._hierarchy)
-            if code is not None:
-                self._emit(code, node.line, node.column, function.name)
+                self._function_nodes.pop()
 
     def _visit_class_decl(self, node: ClassDecl) -> None:
         cls = self._classes.get(node.name)
@@ -483,6 +522,8 @@ class CoreSemanticVisitor(AstVisitor):
             return  # ya reportado como CPS-014 por el frontend (return fuera de funcion)
         value_type = self._type_of(node.value) if node.value is not None else None
         tracker = self._return_stack[-1]
+        if tracker is None:
+            return
         code = check_return(tracker, value_type, self._hierarchy)
         if code is not None:
             self._emit(code, node.line, node.column, tracker.function.name)

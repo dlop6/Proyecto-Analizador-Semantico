@@ -60,8 +60,7 @@ def check_return(tracker: ReturnTracker, value_type: Type | None, hierarchy: Cla
             return "CPS-113"
         return None
 
-    if value_type is not None:
-        tracker.seen_types.append(value_type)
+    tracker.seen_types.append(value_type if value_type is not None else VOID)
     return None
 
 

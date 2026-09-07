@@ -29,6 +29,7 @@ def test_programa_valido_compila_sin_diagnosticos_y_con_svg():
         function hablar(): string { return this.name; }
     }
     class Perro : Animal {
+        function constructor(name: string) { this.name = name; }
         function hablar(): string { return this.name + " ladra."; }
     }
     let p: Animal = new Perro("Rex");

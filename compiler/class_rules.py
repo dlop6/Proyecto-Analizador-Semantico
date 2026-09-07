@@ -86,13 +86,9 @@ def check_new_call(
     class_name: str, cls: ClassSymbol | None, arg_types: list[Type], hierarchy=None,
 ) -> CheckResult:
     """
-    valida `new Clase(args)` contra el constructor EFECTIVO de `cls`: el propio si lo
-    declara, o el heredado (via ClassSymbol.lookup_member, que ya sube por la cadena de
-    herencia) si no -- una subclase que no redefine 'constructor' hereda el de su padre,
-    igual que java/typescript (ver tests/frontend/fixtures/valid/classes.cps, que ya
-    ejercita justo este patron: `class Perro : Animal { ... }` sin constructor propio,
-    instanciada con `new Perro("Rex")`). si ninguna clase de la cadena declara uno, solo
-    se permite `new Clase()` sin argumentos. el tipo resultante SIEMPRE es
+    valida `new Clase(args)` contra el constructor propio de `cls`. La regla 12 del PDF
+    del proyecto indica que, si una clase no tiene constructor, solo admite cero
+    argumentos; por eso no se hereda el constructor del padre. El tipo resultante SIEMPRE es
     ClassType(class_name) -- a diferencia de una llamada a funcion, el uso incorrecto de
     los argumentos no cambia que 'new Clase(...)' produzca un valor de tipo Clase.
     """
@@ -100,7 +96,7 @@ def check_new_call(
     if cls is None:
         return ERROR, None, None  # clase no declarada, ya reportado por el frontend (CPS-023)
 
-    constructor = cls.lookup_member(CONSTRUCTOR_NAME)
+    constructor = cls.constructor
     if not isinstance(constructor, FunctionSymbol):
         if len(arg_types) != 0:
             return result_type, "CPS-210", class_name

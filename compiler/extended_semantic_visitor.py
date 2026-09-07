@@ -57,9 +57,9 @@ from compiler.ast_nodes import (
 from compiler.class_rules import check_method_call, check_new_call, check_override, check_property_access
 from compiler.diagnostics import Diagnostic, DiagnosticBag, Severity
 from compiler.scopes import SymbolTable
-from compiler.symbols import ClassSymbol, FunctionSymbol
+from compiler.symbols import ClassSymbol, FunctionSymbol, VariableSymbol
 from compiler.types import (
-    ArrayType, BOOLEAN, ClassHierarchy, ClassType, ERROR, ErrorType, INTEGER, STRING, Type,
+    ArrayType, BOOLEAN, ClassHierarchy, ClassType, ERROR, EmptyArrayType, ErrorType, INTEGER, STRING, Type,
     is_assignable,
 )
 
@@ -85,6 +85,7 @@ _MESSAGES: dict[str, str] = {
     "CPS-211": "el argumento {detail} es incompatible con el parametro del constructor",
     "CPS-212": "numero de argumentos incorrecto en la llamada al metodo '{detail}'",
     "CPS-213": "el argumento {detail} es incompatible con el parametro del metodo",
+    "CPS-214": "el literal de arreglo vacio requiere un tipo de contexto",
 }
 
 # ninguno de estos codigos es advertencia: todos impiden result.ok, a diferencia de
@@ -128,6 +129,14 @@ class _ClassHierarchyView:
             cls = cls.parent
         return False
 
+    def ancestors(self, name: str) -> list[str]:
+        result: list[str] = []
+        cls = self._classes.get(name)
+        while cls is not None:
+            result.append(cls.name)
+            cls = cls.parent
+        return result
+
 
 class ExtendedSemanticVisitor(AstVisitor):
     """un ExtendedSemanticVisitor por compilacion, sin estado compartido entre llamadas."""
@@ -167,6 +176,14 @@ class ExtendedSemanticVisitor(AstVisitor):
         message = template.format(detail=detail) if detail is not None else template
         severity = Severity.WARNING if code in _WARNING_CODES else Severity.ERROR
         self._diag.add(Diagnostic(code=code, message=message, line=line, column=column, severity=severity))
+
+    def _emit_const_reassignment(self, line: int, column: int, name: str) -> None:
+        # CPS-102 pertenece al catalogo core; la regla es la misma para variables y
+        # atributos, asi que se conserva el codigo sin duplicarlo en el catalogo 2xx.
+        self._diag.add(Diagnostic(
+            code="CPS-102", message=f"no se puede reasignar la constante '{name}'",
+            line=line, column=column, severity=Severity.ERROR,
+        ))
 
     def _type_of(self, expr: Expr | None) -> Type:
         # mismo criterio que CoreSemanticVisitor._type_of: None ("todavia no
@@ -231,6 +248,8 @@ class ExtendedSemanticVisitor(AstVisitor):
         if node.initializer is not None:
             self.visit(node.initializer)
         if node.declared_type is None or node.initializer is None:
+            if node.initializer is not None and isinstance(node.initializer.inferred_type, EmptyArrayType):
+                self._emit("CPS-214", node.line, node.column)
             return
         if not _is_extended_typed(node.initializer):
             return  # la semantica core ya lo valido con el tipo correcto
@@ -320,6 +339,11 @@ class ExtendedSemanticVisitor(AstVisitor):
         target = node.target
         if isinstance(target, PropertyAccess):
             self._visit_property_access(target)
+            obj_type = self._type_of(target.obj)
+            cls = self._classes.get(obj_type.name) if isinstance(obj_type, ClassType) else None
+            member = cls.lookup_member(target.name) if cls is not None else None
+            if isinstance(member, VariableSymbol) and member.is_const:
+                self._emit_const_reassignment(node.line, node.column, target.name)
             self._check_assignment_compat(
                 target.inferred_type, node.value, "CPS-203", node.line, node.column, target.name,
             )

@@ -11,11 +11,28 @@ cuenta.
 """
 from __future__ import annotations
 
+from werkzeug.exceptions import RequestEntityTooLarge
+
 from flask import Flask, jsonify, render_template, request
 
 from compiler.compiler_service import compile_source
+from compiler.frontend import MAX_SOURCE_BYTES
 
 app = Flask(__name__)
+# Margen fijo para las llaves, nombre de campo y comillas del objeto JSON. El
+# compilador conserva MAX_SOURCE_BYTES como segunda defensa sobre el string ya
+# decodificado.
+JSON_ENVELOPE_BYTES = 1024
+app.config["MAX_CONTENT_LENGTH"] = MAX_SOURCE_BYTES + JSON_ENVELOPE_BYTES
+
+
+def _error_response(message: str, status: int):
+    return jsonify({"success": False, "diagnostics": [], "ast_svg": None, "error": message}), status
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def request_too_large(_error):
+    return _error_response("el request excede el tamano maximo permitido", 413)
 
 
 @app.get("/")
@@ -25,10 +42,15 @@ def index():
 
 @app.post("/api/compile")
 def api_compile():
-    body = request.get_json(silent=True) or {}
+    if request.is_json:
+        body = request.get_json(silent=True)
+        if body is None:
+            return _error_response("JSON invalido", 400)
+    else:
+        body = {}
     source = body.get("source", "")
     if not isinstance(source, str):
-        return jsonify({"error": "'source' debe ser un string"}), 400
+        return _error_response("'source' debe ser un string", 400)
 
     result = compile_source(source)
     return jsonify({
@@ -44,6 +66,7 @@ def api_compile():
             for diag in result.diagnostics
         ],
         "ast_svg": result.ast_svg,
+        "error": None,
     })
 
 

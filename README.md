@@ -272,13 +272,10 @@ semántica core mantiene su **propio** catálogo en `compiler/core_semantic_visi
   un análisis de punto fijo — una limitación documentada y aceptada: el enunciado no exige
   resolver ese caso, y una función *con* anotación de retorno nunca lo sufre (su tipo se
   conoce desde la fase de firmas del frontend).
-- **Funciones anidadas dentro de un cuerpo (no top-level, no método).** `symbol_collector.py`
-  abre un scope para su cuerpo pero no la registra como símbolo en ningún scope (solo
-  predeclara nombres top-level). `CoreSemanticVisitor` sigue analizando su cuerpo con
-  normalidad, pero no puede validar sus `return` contra una firma que no existe, y una
-  llamada a esa función por nombre reporta `CPS-103`. Es una limitación conocida del
-  frontend, no de esta etapa — está fuera del alcance de Persona 2 modificar
-  `symbol_collector.py`.
+- **Funciones anidadas.** Una funcion anidada se registra en su scope contenedor antes
+  de recorrer su propio cuerpo, por lo que admite autorrecursion y closures basicos de
+  simbolos ya declarados en scopes padres. No hay hoisting de funciones hermanas ni
+  captura de variables declaradas despues del punto de definicion.
 - **Igualdad de tipos por valor, no por identidad.** Los tipos primitivos (`INTEGER`,
   `STRING`, `BOOLEAN`) son singletons en `types.py`, pero las reglas de esta etapa los
   comparan con `==` (igualdad estructural de dataclass) y no con `is`, para que sigan
@@ -344,8 +341,8 @@ result = analyze_extended(analyze_core(analyze_source(source))) -> ExtendedSeman
 - **Llamadas a método** (`obj.metodo(args)`) y **`new Clase(args)`**: validan aridad y
   tipos de argumento reusando `function_rules.check_call` (no se reimplementa ese loop),
   remapeando sus códigos al rango propio `CPS-2xx`. `new Clase(...)` valida contra el
-  constructor **efectivo** de la clase — el propio si lo declara, o el heredado si no
-  (una subclase sin `constructor` propio hereda el de su padre, como en Java/TypeScript).
+  constructor propio de la clase. Si una subclase no declara constructor, solo acepta
+  cero argumentos, segun la regla 12 del PDF del proyecto.
   El tipo resultante de `NewExpr` siempre es `ClassType(Clase)`, tenga o no errores de
   argumentos.
 - **`this`**: la validación estructural (solo dentro de método/constructor) ya la hace el
@@ -363,8 +360,8 @@ result = analyze_extended(analyze_core(analyze_source(source))) -> ExtendedSeman
   ternario de la core generalizada a N elementos). Arreglos anidados salen gratis de
   aplicar esa reducción sobre tipos ya inferidos de adentro hacia afuera.
 - **Literal vacío**: `[]` tiene el tipo comodín `EmptyArrayType`, ya asignable a
-  cualquier `ArrayType` (`types.py`) — así `let a: integer[] = [];` funciona sin
-  inferencia bidireccional real.
+  cualquier `ArrayType` (`types.py`) cuando una anotacion provee contexto — asi
+  `let a: integer[] = [];` funciona, pero `let a = [];` reporta `CPS-214`.
 - **Índices**: deben ser `integer` (`CPS-205`); no hay análisis estático de rangos
   numéricos (fuera de alcance, regla 9 del PDF).
 - **`arr[i]` como destino de asignación**: resuelve el tipo del elemento igual que una
@@ -390,21 +387,17 @@ result = analyze_extended(analyze_core(analyze_source(source))) -> ExtendedSeman
 | CPS-211 | error | argumento incompatible en `new Clase(...)` |
 | CPS-212 | error | aridad incorrecta en llamada a método |
 | CPS-213 | error | argumento incompatible en llamada a método |
+| CPS-214 | error | literal de arreglo vacío sin tipo de contexto |
 
 ### Decisiones de diseño relevantes (semántica extendida)
 
 - **Sin cursor de scopes por posición** (a diferencia de la core): este visitor nunca
   hace `lookup` de identificadores, así que no necesita reconstruir `_scope_by_pos`
   (YAGNI). Ver `ARCHITECTURE.md` para el detalle.
-- **`CPS-209` cierra un hueco real de la arquitectura de dos pasadas**: la core valida
-  `let x: T = expr;`/`x = expr;` en el momento en que los visita — si `expr` es un
-  `NewExpr`/`ArrayLiteral`/`PropertyAccess`/`IndexAccess`/llamada a método, su tipo
-  todavía es `None` en ese momento, así que la comparación se salta por completo (no se
-  absorbe como "compatible": nunca se valida). Esta etapa cierra ese caso puntual sin
-  tocar `core_semantic_visitor.py` ni duplicar ninguna validación que la core ya haya
-  hecho bien (ver el docstring de `extended_semantic_visitor.py` para el detalle exacto).
-  Un caso análogo con `return expr;` queda como limitación conocida (ver
-  `ARCHITECTURE.md`, "Limitaciones conocidas").
+- **Revalidacion de tipos.** Tras completar tipos de clases y arreglos, las pasadas core
+  y extendida se alternan hasta estabilizar el AST y la tabla de simbolos. Asi returns,
+  condiciones, llamadas y operadores siempre consumen el tipo final, sin un catalogo
+  especial por el origen de la expresion.
 - **Reuso de `function_rules.check_call`** en `class_rules.py` para llamadas a
   constructor y a método, remapeando sus códigos `CPS-1xx` a `CPS-2xx` propios — evita
   duplicar el loop de validación de aridad/tipos sin mezclar catálogos de etapas

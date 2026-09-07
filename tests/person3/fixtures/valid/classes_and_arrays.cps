@@ -18,6 +18,10 @@ class Animal {
 }
 
 class Perro : Animal {
+    function constructor(name: string) {
+        this.name = name;
+    }
+
     function hablar(): string {
         return this.name + " ladra.";
     }

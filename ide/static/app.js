@@ -39,9 +39,13 @@
     for (const diag of data.diagnostics) {
       const li = document.createElement("li");
       li.className = diag.severity;
-      li.innerHTML =
-        `<span class="code">${diag.code}</span> ` +
-        `<span class="pos">${diag.line}:${diag.column}</span> &mdash; ${diag.message}`;
+      const code = document.createElement("span");
+      code.className = "code";
+      code.textContent = diag.code;
+      const pos = document.createElement("span");
+      pos.className = "pos";
+      pos.textContent = `${diag.line}:${diag.column}`;
+      li.append(code, " ", pos, " — ", diag.message);
       listEl.appendChild(li);
     }
     if (data.diagnostics.length === 0) {

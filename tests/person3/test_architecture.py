@@ -23,7 +23,10 @@ _ALLOWED_IMPORTS = {
     "extended_semantic_visitor": {
         "array_rules", "ast_nodes", "class_rules", "diagnostics", "scopes", "symbols", "types",
     },
-    "extended_semantics": {"ast_nodes", "core_semantics", "diagnostics", "extended_semantic_visitor", "scopes"},
+    "extended_semantics": {
+        "ast_nodes", "core_semantics", "core_semantic_visitor", "diagnostics",
+        "extended_semantic_visitor", "scopes", "symbols",
+    },
 }
 
 

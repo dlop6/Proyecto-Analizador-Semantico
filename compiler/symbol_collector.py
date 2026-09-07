@@ -52,6 +52,14 @@ class _ClassHierarchyView:
             cls = cls.parent
         return False
 
+    def ancestors(self, name: str) -> list[str]:
+        result: list[str] = []
+        cls = self._classes.get(name)
+        while cls is not None:
+            result.append(cls.name)
+            cls = cls.parent
+        return result
+
 
 class SymbolCollector:
     """un collector por compilacion, sin estado compartido entre llamadas."""
@@ -152,7 +160,7 @@ class SymbolCollector:
             return_type=return_type, is_constructor=node.is_constructor, is_method=True,
             owner_class=cls.name,
         )
-        if node.name in cls.methods:
+        if node.name in cls.methods or node.name in cls.fields:
             self._diag.error("CPS-021", node.line, node.column, detail=node.name)
         else:
             cls.methods[node.name] = fn
@@ -163,7 +171,7 @@ class SymbolCollector:
         field_type = self._resolve_type(node.declared_type) if node.declared_type else None
         symbol = VariableSymbol(name=node.name, line=node.line, column=node.column,
                                  type=field_type, is_const=node.is_const, is_field=True)
-        if node.name in cls.fields:
+        if node.name in cls.fields or node.name in cls.methods:
             self._diag.error("CPS-021", node.line, node.column, detail=node.name)
             return
         if cls.parent is not None and cls.parent.lookup_member(node.name) is not None:
@@ -235,7 +243,21 @@ class SymbolCollector:
             self._diag.error("CPS-020", node.line, node.column, detail=node.name)
 
     def _visit_function_decl(self, node: FunctionDecl) -> None:
-        # top-level ya viene predeclarada; los metodos se resuelven en _visit_class_decl
+        # Las top-level ya vienen predeclaradas. Una funcion anidada se declara en su
+        # scope lexico antes de visitar su cuerpo: permite autorrecursion y closures
+        # basicos sin introducir hoisting de funciones hermanas.
+        if self.symbols.current.lookup_local(node.name) is None:
+            params = [
+                VariableSymbol(name=p.name, line=p.line, column=p.column,
+                               type=self._resolve_type(p.declared_type), is_param=True, initialized=True)
+                for p in node.params
+            ]
+            fn = FunctionSymbol(
+                name=node.name, line=node.line, column=node.column, params=params,
+                return_type=self._resolve_type(node.return_type) if node.return_type else None,
+            )
+            if self.symbols.declare(fn) is None:
+                self._diag.error("CPS-020", node.line, node.column, detail=node.name)
         with self.symbols.push(ScopeKind.FUNCTION, f"function:{node.name}", node.line, node.column):
             self._declare_params(node.params)
             self._visit_function_body(node.body)

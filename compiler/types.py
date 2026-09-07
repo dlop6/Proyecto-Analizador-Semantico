@@ -100,6 +100,10 @@ class ClassHierarchy(Protocol):
     def is_subclass(self, sub_name: str, super_name: str) -> bool:
         ...
 
+    def ancestors(self, name: str) -> list[str]:
+        """Cadena nominal desde `name` hasta su raiz conocida, inclusiva."""
+        ...
+
 
 def same_type(a: Type, b: Type) -> bool:
     """igualdad estructural exacta. no mira herencia ni conversiones, es la relacion base."""
@@ -186,11 +190,16 @@ def _closest_common_ancestor(a: ClassType, b: ClassType, hierarchy: ClassHierarc
     sube por la cadena de `a` (via is_subclass) buscando el primer ancestro que tambien
     lo sea de `b`. es lineal, no hace falta nada mas fino para el alcance del proyecto.
     """
-    # necesitamos la lista de ancestros de a, pero el protocolo solo da is_subclass punto a punto.
-    # como no tenemos acceso a la cadena completa desde aca, delegamos: si a es subclase de b o
-    # viceversa, el ancestro comun es el mas general de los dos. sin mas informacion no se puede
-    # subir mas alto que eso desde types.py (symbol_collector.py sí conoce la cadena completa
-    # y puede resolver casos con un ancestro comun mas arriba).
+    ancestors = getattr(hierarchy, "ancestors", None)
+    if ancestors is not None:
+        ancestors_of_a = set(ancestors(a.name))
+        for name in ancestors(b.name):
+            if name in ancestors_of_a:
+                return ClassType(name)
+        return None
+
+    # Compatibilidad con implementaciones antiguas del protocolo: aun pueden resolver
+    # la relacion directa, pero no hermanas sin exponer la cadena completa.
     if hierarchy.is_subclass(a.name, b.name):
         return b
     if hierarchy.is_subclass(b.name, a.name):
