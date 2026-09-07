@@ -15,7 +15,7 @@ diagnostico o None; no escriben en la bolsa de diagnosticos ni conocen su catalo
 from __future__ import annotations
 
 from compiler.ast_nodes import BreakStatement, ContinueStatement, ReturnStatement, Stmt
-from compiler.types import BOOLEAN, ClassHierarchy, ErrorType, INTEGER, STRING, Type, is_assignable
+from compiler.types import ArrayType, BOOLEAN, ClassHierarchy, ErrorType, INTEGER, STRING, Type, is_assignable
 
 _VALID_SWITCH_TYPES = (INTEGER, STRING, BOOLEAN)
 _TERMINATORS = (ReturnStatement, BreakStatement, ContinueStatement)
@@ -34,6 +34,13 @@ def check_switch_case(subject_type: Type, case_type: Type, hierarchy: ClassHiera
         return None
     compatible = is_assignable(subject_type, case_type, hierarchy) or is_assignable(case_type, subject_type, hierarchy)
     return None if compatible else "CPS-116"
+
+
+def check_foreach_iterable(iterable_type: Type) -> "str | None":
+    """foreach necesita un arreglo cuyo tipo de elemento ya sea conocido."""
+    if isinstance(iterable_type, ErrorType):
+        return None
+    return None if isinstance(iterable_type, ArrayType) else "CPS-120"
 
 
 def find_dead_code(statements: list[Stmt]) -> list[Stmt]:

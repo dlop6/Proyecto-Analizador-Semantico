@@ -14,6 +14,13 @@
   <main>
     <section id="editor-pane">
       <h2>Código fuente</h2>
+      <div class="editor-actions">
+        <input id="source-file" class="visually-hidden" type="file" accept=".cps"
+               data-max-source-bytes="{{ max_source_bytes }}" aria-describedby="file-status">
+        <label class="file-button" for="source-file">Abrir archivo .cps</label>
+        <span id="file-name" aria-live="polite">Sin archivo seleccionado</span>
+      </div>
+      <p id="file-status" class="file-status" aria-live="polite"></p>
       <textarea id="source" spellcheck="false" placeholder="Escribí tu programa Compiscript acá...">let x: integer = 1;
 print(x);
 </textarea>

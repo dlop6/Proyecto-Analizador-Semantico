@@ -1,7 +1,7 @@
 """tests de compiler/control_flow_rules.py: switch y codigo muerto."""
 from compiler.ast_nodes import BreakStatement, ContinueStatement, ExprStatement, Identifier, ReturnStatement
-from compiler.control_flow_rules import check_switch_case, check_switch_subject, find_dead_code
-from compiler.types import BOOLEAN, ClassType, ERROR, INTEGER, NULL, STRING
+from compiler.control_flow_rules import check_foreach_iterable, check_switch_case, check_switch_subject, find_dead_code
+from compiler.types import ArrayType, BOOLEAN, ClassType, EMPTY_ARRAY, ERROR, INTEGER, NULL, STRING
 
 
 # ---------- switch ----------
@@ -32,6 +32,21 @@ def test_case_incompatible_con_discriminante_reporta_cps116():
 
 def test_case_null_contra_discriminante_de_clase_es_compatible():
     assert check_switch_case(ClassType("Animal"), NULL) is None
+
+
+# ---------- foreach ----------
+
+def test_foreach_acepta_arreglo_tipado():
+    assert check_foreach_iterable(ArrayType(INTEGER)) is None
+
+
+def test_foreach_rechaza_iterable_no_arreglo_y_arreglo_vacio():
+    assert check_foreach_iterable(INTEGER) == "CPS-120"
+    assert check_foreach_iterable(EMPTY_ARRAY) == "CPS-120"
+
+
+def test_foreach_no_cascadea_sobre_error_previo():
+    assert check_foreach_iterable(ERROR) is None
 
 
 # ---------- codigo muerto ----------

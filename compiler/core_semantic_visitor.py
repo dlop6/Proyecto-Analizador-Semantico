@@ -27,7 +27,7 @@ from compiler.ast_nodes import (
     IntegerLiteral, NullLiteral, Program, ReturnStatement, Stmt, StringLiteral,
     SwitchStatement, Ternary, TryCatchStatement, UnaryOp, VarDecl, WhileStatement,
 )
-from compiler.control_flow_rules import check_switch_case, check_switch_subject, find_dead_code
+from compiler.control_flow_rules import check_foreach_iterable, check_switch_case, check_switch_subject, find_dead_code
 from compiler.diagnostics import Diagnostic, DiagnosticBag, Severity
 from compiler.expression_rules import check_binary_op, check_condition, check_ternary, check_unary_op
 from compiler.function_rules import ReturnTracker, check_call, check_return, finalize_return_type
@@ -61,6 +61,8 @@ _MESSAGES: dict[str, str] = {
     "CPS-116": "el 'case' es incompatible con el tipo del discriminante",
     "CPS-117": "codigo inalcanzable",
     "CPS-118": "el operador ternario no tiene un tipo comun entre sus ramas",
+    "CPS-119": "el identificador '{detail}' no puede usarse como valor sin una construccion o llamada valida",
+    "CPS-120": "la expresion de 'foreach' debe ser un arreglo con tipo de elemento conocido",
 }
 
 # codigos que son advertencia y no error, igual que _WARNING_CODES en diagnostics.py
@@ -316,9 +318,11 @@ class CoreSemanticVisitor(AstVisitor):
                 return
             node.inferred_type = symbol.type if symbol.type is not None else ERROR
             return
-        # nombre de clase o funcion usado como valor: compiscript no tiene funciones ni
-        # clases de primera clase, se deja tipo error (absorbe en silencio) en vez de
-        # inventar un diagnostico para un caso que la gramatica no distingue de un uso valido.
+        # Compiscript no tiene funciones ni clases de primera clase. Las llamadas y
+        # construcciones se resuelven por sus visitors propios; fuera de esos contextos
+        # el nombre no representa un valor y debe diagnosticarse una sola vez.
+        if isinstance(symbol, (FunctionSymbol, ClassSymbol)):
+            self._emit("CPS-119", node.line, node.column, node.name)
         node.inferred_type = ERROR
 
     def _visit_integer_literal(self, node) -> None:
@@ -482,6 +486,9 @@ class CoreSemanticVisitor(AstVisitor):
     def _visit_foreach(self, node: ForeachStatement) -> None:
         self.visit(node.iterable)
         iterable_type = self._type_of(node.iterable)
+        code = check_foreach_iterable(iterable_type)
+        if code is not None:
+            self._emit(code, node.iterable.line, node.iterable.column)
         with self._enter(node):
             var_symbol = self._current.lookup_local(node.var_name)
             if isinstance(var_symbol, VariableSymbol):

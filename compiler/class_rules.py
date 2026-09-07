@@ -51,10 +51,9 @@ def check_property_access(
         return ERROR, "CPS-200", member_name
     if isinstance(member, VariableSymbol):
         return (member.type if member.type is not None else ERROR), None, None
-    # FunctionSymbol referenciado sin invocarlo: compiscript no tiene funciones de
-    # primera clase, mismo criterio que CoreSemanticVisitor._visit_identifier con
-    # nombres de funcion top-level -- se absorbe en silencio, sin diagnostico.
-    return ERROR, None, None
+    # Compiscript no tiene metodos de primera clase; el visitor de llamadas usa
+    # check_method_call, asi que este diagnostico solo representa una lectura real.
+    return ERROR, "CPS-215", member_name
 
 
 def check_method_call(

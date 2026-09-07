@@ -5,6 +5,7 @@ tambien que el ide no reimplementa nada -- solo delega a compiler_service.compil
 """
 import pytest
 
+from compiler.frontend import MAX_SOURCE_BYTES
 from ide.app import app
 
 
@@ -18,6 +19,34 @@ def test_index_sirve_la_pantalla_principal(client):
     response = client.get("/")
     assert response.status_code == 200
     assert b"Compiscript" in response.data
+
+
+def test_index_ofrece_selector_de_archivos_cps(client):
+    response = client.get("/")
+    assert b'type="file"' in response.data
+    assert b'accept=".cps"' in response.data
+
+
+def test_index_comparte_el_limite_de_fuente_con_el_cliente(client):
+    response = client.get("/")
+    assert f'data-max-source-bytes="{MAX_SOURCE_BYTES}"'.encode() in response.data
+
+
+def test_cliente_lee_archivos_con_filereader_y_maneja_error():
+    source = (app.root_path + "/static/app.js")
+    with open(source, encoding="utf-8") as javascript:
+        contents = javascript.read()
+    assert "new FileReader()" in contents
+    assert "readAsText(file" in contents
+    assert "reader.onerror" in contents
+
+
+def test_cliente_valida_extension_y_tamano_antes_de_cargar_archivo():
+    source = (app.root_path + "/static/app.js")
+    with open(source, encoding="utf-8") as javascript:
+        contents = javascript.read()
+    assert 'endsWith(".cps")' in contents
+    assert "file.size > maxSourceBytes" in contents
 
 
 def test_compile_programa_valido_devuelve_success_true(client):

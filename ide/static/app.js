@@ -8,6 +8,49 @@
   const listEl = document.getElementById("diagnostics-list");
   const astEl = document.getElementById("ast-container");
   const btnEl = document.getElementById("compile-btn");
+  const fileEl = document.getElementById("source-file");
+  const fileNameEl = document.getElementById("file-name");
+  const fileStatusEl = document.getElementById("file-status");
+  const maxSourceBytes = Number(fileEl.dataset.maxSourceBytes);
+
+  function clearResult() {
+    listEl.innerHTML = "";
+    statusEl.textContent = "";
+    statusEl.className = "";
+    astEl.innerHTML = '<p class="hint">Compilá para ver el árbol.</p>';
+  }
+
+  function setFileStatus(message, className) {
+    fileStatusEl.textContent = message;
+    fileStatusEl.className = `file-status ${className}`;
+  }
+
+  function loadSelectedFile() {
+    const file = fileEl.files[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".cps")) {
+      setFileStatus("Seleccioná un archivo con extensión .cps.", "fail");
+      fileEl.value = "";
+      return;
+    }
+    if (file.size > maxSourceBytes) {
+      setFileStatus("El archivo excede el límite de 5 MiB.", "fail");
+      fileEl.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function () {
+      sourceEl.value = String(reader.result);
+      fileNameEl.textContent = file.name;
+      setFileStatus("Archivo cargado. Podés editarlo antes de compilar.", "ok");
+      clearResult();
+    };
+    reader.onerror = function () {
+      setFileStatus("No se pudo leer el archivo seleccionado.", "fail");
+    };
+    reader.readAsText(file, "UTF-8");
+  }
 
   async function compile() {
     btnEl.disabled = true;
@@ -62,4 +105,5 @@
   }
 
   btnEl.addEventListener("click", compile);
+  fileEl.addEventListener("change", loadSelectedFile);
 })();

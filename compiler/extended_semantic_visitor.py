@@ -86,6 +86,7 @@ _MESSAGES: dict[str, str] = {
     "CPS-212": "numero de argumentos incorrecto en la llamada al metodo '{detail}'",
     "CPS-213": "el argumento {detail} es incompatible con el parametro del metodo",
     "CPS-214": "el literal de arreglo vacio requiere un tipo de contexto",
+    "CPS-215": "el metodo '{detail}' debe invocarse para producir un valor",
 }
 
 # ninguno de estos codigos es advertencia: todos impiden result.ok, a diferencia de

@@ -35,6 +35,95 @@ def test_argumento_new_incompatible_no_se_acepta():
     assert "CPS-112" in codes(source)
 
 
+def test_funcion_no_se_puede_usar_como_valor_directo():
+    source = "function f(): integer { return 1; } let x = f;"
+    assert "CPS-119" in codes(source)
+
+
+def test_funcion_no_se_puede_usar_en_operacion():
+    source = "function f(): integer { return 1; } let x = f * 2;"
+    result_codes = codes(source)
+    assert "CPS-119" in result_codes
+    assert "CPS-104" not in result_codes
+
+
+def test_funcion_no_se_puede_usar_como_condicion():
+    source = "function f(): integer { return 1; } if (f) { print(1); }"
+    result_codes = codes(source)
+    assert "CPS-119" in result_codes
+    assert "CPS-109" not in result_codes
+
+
+def test_funcion_no_se_puede_pasar_como_argumento():
+    source = "function f(): integer { return 1; } function g(x: integer) {} g(f);"
+    result_codes = codes(source)
+    assert "CPS-119" in result_codes
+    assert "CPS-112" not in result_codes
+
+
+def test_clase_no_se_puede_usar_como_valor_sin_new():
+    assert "CPS-119" in codes("class A {} let x = A;")
+
+
+def test_metodo_no_se_puede_leer_sin_invocarlo():
+    source = "class A { function m(): integer { return 1; } } let a: A = new A(); let x = a.m;"
+    assert "CPS-215" in codes(source)
+
+
+def test_llamadas_de_funcion_y_metodo_siguen_siendo_validas():
+    source = """
+    function f(): integer { return 1; }
+    class A { function m(): integer { return f(); } }
+    let a: A = new A();
+    let x: integer = a.m();
+    """
+    assert analyze_full(source).ok
+
+
+def test_foreach_requiere_arreglo_y_rechaza_integer():
+    assert "CPS-120" in codes("foreach (x in 1) { print(x); }")
+
+
+def test_foreach_requiere_arreglo_y_rechaza_otros_primitivos():
+    source = 'foreach (x in true) { print(x); } foreach (y in "texto") { print(y); }'
+    assert "CPS-120" in codes(source)
+
+
+def test_foreach_rechaza_instancia_de_clase_despues_de_revalidar():
+    source = "class A {} foreach (x in new A()) { print(x); }"
+    assert "CPS-120" in codes(source)
+
+
+def test_foreach_con_identificador_no_declarado_no_cascadea():
+    result_codes = codes("foreach (x in desconocido) { print(x); }")
+    assert result_codes == {"CPS-103"}
+
+
+def test_foreach_con_arreglo_vacio_sin_elemento_inferible_es_error():
+    assert "CPS-120" in codes("foreach (x in []) { print(x); }")
+
+
+def test_foreach_con_arreglo_inferido_asigna_el_tipo_del_elemento():
+    result = analyze_full("let numeros = [1, 2]; foreach (n in numeros) { print(n); }")
+    iterator = next(
+        symbol for scope in result.symbols.all_scopes() for symbol in scope.symbols.values()
+        if getattr(symbol, "is_iteration_var", False)
+    )
+    assert result.ok
+    assert iterator.type == INTEGER
+
+
+def test_foreach_con_atributo_arreglo_asigna_el_tipo_del_elemento():
+    source = "class A { let valores: integer[]; } let a: A = new A(); foreach (n in a.valores) { print(n); }"
+    result = analyze_full(source)
+    iterator = next(
+        symbol for scope in result.symbols.all_scopes() for symbol in scope.symbols.values()
+        if getattr(symbol, "is_iteration_var", False)
+    )
+    assert result.ok
+    assert iterator.type == INTEGER
+
+
 def test_operacion_con_indice_extendido_no_se_acepta():
     source = 'let a: integer[] = [1]; let x: string = a[0] + "y";'
     assert "CPS-104" in codes(source)

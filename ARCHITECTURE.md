@@ -11,7 +11,8 @@ source -> frontend -> core_semantics -> extended_semantics -> AST SVG -> IDE
 1. **Frontend.** `frontend.analyze_source` ejecuta ANTLR, construye el AST propio y
    recolecta simbolos. Ante un error lexico o sintactico no construye AST.
 2. **Semantica core.** `core_semantics.analyze` resuelve nombres por scope, tipos
-   primitivos, funciones, retornos y control de flujo.
+   primitivos, funciones, retornos y control de flujo. Un nombre de función o clase
+   usado como valor se rechaza con `CPS-119`.
 3. **Semantica extendida.** `extended_semantics.analyze` completa clases, miembros,
    `new`, arreglos e indices. Como esos tipos pueden ser hijos de expresiones core,
    alterna las pasadas core y extendida hasta estabilizar los tipos del AST y de los
@@ -52,6 +53,11 @@ anidada. `this` solo existe en scopes de metodos y constructores.
 - Los arreglos son invariantes.
 - El ancestro comun de clases se calcula recorriendo ambas cadenas de herencia.
 - `[]` requiere contexto de una anotacion de arreglo; sin ella reporta `CPS-214`.
+- Un método leído sin invocarlo reporta `CPS-215`; Compiscript no tiene métodos ni
+  funciones de primera clase.
+- `foreach` exige `ArrayType(T)` y asigna `T` a su variable de iteración. Un iterable
+  no-arreglo o `[]` sin tipo de elemento reporta `CPS-120`; la revalidación detecta
+  también propiedades, índices, llamadas y construcciones tipadas después de core.
 - Una subclase sin constructor propio acepta solo cero argumentos, segun la regla 12
   del PDF del proyecto. Metodos y atributos si usan lookup heredado.
 
@@ -73,6 +79,8 @@ columna y codigo. Los rangos son:
 
 `CPS-214` indica un literal de arreglo vacio sin tipo de contexto. `CPS-102` se reutiliza
 para cualquier reasignacion de constante, incluidos atributos `const`.
+`CPS-119` y `CPS-120` son diagnósticos core; `CPS-215` pertenece a la semántica
+extendida.
 
 ## IDE
 
@@ -80,9 +88,17 @@ El IDE Flask solo delega en `compile_source`. El cliente construye diagnosticos 
 `textContent`, por lo que el codigo fuente del usuario nunca se interpreta como HTML.
 Todas las respuestas de la API incluyen `success`, `diagnostics`, `ast_svg` y `error`.
 El limite HTTP se aplica antes de deserializar JSON, y el compilador conserva su limite
-de fuente como segunda defensa.
+de fuente como segunda defensa. El selector `.cps` lee localmente con `FileReader`,
+valida extensión y tamaño con el mismo límite del compilador y solo envía el texto al
+servidor cuando el usuario pulsa “Compilar”.
 
 ## Limites intencionales
 
 Se sigue KISS/YAGNI: no hay float, optimizador, interprete, debugger, persistencia,
 autenticacion, autocompletado, rate limiting, CFG ni analisis de flujo avanzado.
+
+## Pendientes docentes
+
+No se cambia `float`, `switch` ni `break` hasta confirmar contradicciones entre los
+requisitos semánticos, la gramática y los ejemplos oficiales. El comportamiento actual
+se conserva y está documentado en el README.

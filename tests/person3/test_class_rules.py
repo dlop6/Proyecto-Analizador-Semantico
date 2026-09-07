@@ -62,10 +62,10 @@ def test_acceso_a_miembro_inexistente_reporta_cps200():
     assert result == ERROR
 
 
-def test_acceso_a_metodo_sin_invocarlo_da_error_silencioso():
+def test_acceso_a_metodo_sin_invocarlo_reporta_cps215():
     animal = _class("Animal", methods=[_method("hablar", return_type=STRING)])
     result, code, detail = check_property_access(ClassType("Animal"), "hablar", {"Animal": animal})
-    assert code is None
+    assert code == "CPS-215"
     assert result == ERROR
 
 

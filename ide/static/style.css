@@ -44,6 +44,44 @@ header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
 
 #compile-btn:hover { filter: brightness(1.1); }
 #compile-btn:disabled { opacity: 0.6; cursor: wait; }
+#compile-btn:focus-visible, .file-button:focus-visible, #source:focus-visible {
+  outline: 2px solid #fdd663;
+  outline-offset: 2px;
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 0.4rem;
+}
+
+.file-button {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--accent);
+  padding: 0.35rem 0.65rem;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.file-button:hover { background: rgba(122, 162, 247, 0.14); }
+#file-name, .file-status { color: var(--muted); font-size: 0.75rem; }
+.file-status { min-height: 1.15rem; margin: 0 0 0.35rem; }
+.file-status.ok { color: #81c995; }
+.file-status.fail { color: var(--error); }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 main {
   flex: 1;
@@ -121,3 +159,9 @@ section h2 {
 #ast-container svg { max-width: 100%; height: auto; }
 
 .hint { color: var(--muted); font-size: 0.85rem; }
+
+@media (max-width: 900px) {
+  body { height: auto; min-height: 100vh; }
+  main { grid-template-columns: 1fr; overflow: visible; }
+  section { min-height: 18rem; }
+}

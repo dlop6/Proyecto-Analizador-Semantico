@@ -248,6 +248,8 @@ semántica core mantiene su **propio** catálogo en `compiler/core_semantic_visi
 | CPS-116 | error | `case` incompatible con el tipo del discriminante |
 | CPS-117 | warning | código inalcanzable después de `return`/`break`/`continue` en el mismo bloque |
 | CPS-118 | warning\* | el operador ternario no tiene un tipo común entre sus dos ramas |
+| CPS-119 | error | función o clase usada como valor sin llamada o construcción válida |
+| CPS-120 | error | iterable de `foreach` que no es un arreglo con tipo de elemento conocido |
 
 \* CPS-118 se reporta con severidad de error (impide `result.ok`); solo CPS-117 es warning.
 
@@ -388,6 +390,7 @@ result = analyze_extended(analyze_core(analyze_source(source))) -> ExtendedSeman
 | CPS-212 | error | aridad incorrecta en llamada a método |
 | CPS-213 | error | argumento incompatible en llamada a método |
 | CPS-214 | error | literal de arreglo vacío sin tipo de contexto |
+| CPS-215 | error | método referenciado sin invocarlo |
 
 ### Decisiones de diseño relevantes (semántica extendida)
 
@@ -466,8 +469,10 @@ result = compile_source(source) -> CompilationResult(success, diagnostics, ast_s
 
 ## IDE
 
-Interfaz web mínima (Flask, una sola pantalla) para pegar código Compiscript, compilarlo
-y ver diagnósticos + el AST como SVG. Sin autenticación, sin persistencia, sin
+Interfaz web mínima (Flask, una sola pantalla) para cargar un archivo `.cps` o pegar
+código Compiscript, compilarlo y ver diagnósticos + el AST como SVG. El selector valida
+la extensión y el límite de 5 MiB antes de leer localmente el archivo; cargarlo no lo
+compila automáticamente, por lo que se puede editar antes de usar “Compilar”. Sin autenticación, sin persistencia, sin
 autocompletado, sin debugger — exactamente el alcance que pide el enunciado para esta
 etapa. Cero lógica semántica en `ide/app.py` ni en el template: la única función con
 lógica real llama a `compiler_service.compile_source` y devuelve su resultado como JSON.
@@ -481,7 +486,7 @@ python -m ide.app
 ```
 
 Abrir `http://127.0.0.1:5000/` en el navegador. El textarea trae un ejemplo mínimo;
-"Compilar" hace `POST /api/compile` con `{"source": "..."}` y pinta la respuesta
+“Abrir archivo .cps” carga una fuente local y “Compilar” hace `POST /api/compile` con `{"source": "..."}` y pinta la respuesta
 (`{success, diagnostics[], ast_svg}`) en los paneles de diagnósticos y AST.
 
 ### Estructura del IDE
@@ -505,3 +510,20 @@ flask --app ide.app run  # opcional: levantar el ide para probar interactivament
 `pytest tests -q` corre los tests de las 4 etapas (frontend, semántica core, semántica
 extendida, integración) en un solo comando, tal como lo exige el criterio de aceptación
 del proyecto ("pytest completo pasa desde la raíz del repositorio").
+
+## Fixtures para calificación
+
+`tests/grading/fixtures/` contiene cuatro programas pequeños que participan en pruebas
+automatizadas: `valid_complete.cps`, `semantic_errors.cps`, `lexical_recovery.cps` y
+`syntax_recovery.cps`. Sirven para demostrar compilación válida y recuperación léxica,
+sintáctica y semántica durante la evaluación.
+
+## Pendientes de confirmación docente
+
+Tres textos oficiales se contradicen y se mantienen sin cambios hasta recibir una
+decisión docente: `float` se menciona en requisitos semánticos pero no aparece en la
+gramática; los requisitos describen `switch` booleano mientras el ejemplo oficial usa
+un entero; y los requisitos limitan `break` a bucles aunque Compiscript permite
+`break` en `switch`. El comportamiento actual conserva la gramática y los ejemplos
+oficiales: no hay `float`, `switch` acepta `integer`/`string`/`boolean` y `break` es
+válido en un `switch`.

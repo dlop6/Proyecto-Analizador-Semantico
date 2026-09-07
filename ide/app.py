@@ -37,7 +37,7 @@ def request_too_large(_error):
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", max_source_bytes=MAX_SOURCE_BYTES)
 
 
 @app.post("/api/compile")
