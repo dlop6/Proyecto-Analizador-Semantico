@@ -4,9 +4,9 @@ Proyecto de Construcción de Compiladores: analizador semántico para Compiscrip
 (subconjunto de TypeScript), en Python 3 + ANTLR4. El trabajo está dividido en
 etapas con dependencia secuencial (ver `docs/temp/` para la división completa).
 
-**Este README documenta el frontend** (parser, AST, tipos, tabla de símbolos).
-Las secciones de semántica core y de integración/IDE se agregan cuando esas
-etapas del proyecto arrancan.
+**Este README documenta el frontend y la semántica core** (parser, AST, tipos,
+tabla de símbolos; expresiones, funciones y control de flujo). La sección de
+integración/IDE se agrega cuando esa etapa del proyecto arranca.
 
 ## Requisitos
 
@@ -181,3 +181,128 @@ tests/frontend/
   fixtures/{valid,invalid}/*.cps
   test_*.py
 ```
+
+## Semántica core (expresiones, funciones, control de flujo)
+
+Consume exclusivamente `FrontendResult` (ast, symbols, diagnostics) de la sección
+anterior. No reconstruye el AST, los scopes ni la tabla de símbolos: los recorre
+tal como los deja el frontend.
+
+### Contrato congelado: `core_semantics.analyze`
+
+```python
+from compiler.core_semantics import analyze
+from compiler.frontend import analyze_source
+
+result = analyze(analyze_source(source)) -> CoreSemanticResult(ast, symbols, diagnostics)
+```
+
+- `ast` / `symbols`: exactamente los mismos objetos que trae el `FrontendResult` de
+  entrada (misma identidad, no una copia). Si `frontend_result.ast is None` (error de
+  sintaxis), `analyze` no corre nada y devuelve los diagnósticos del frontend tal cual.
+- `diagnostics`: los diagnósticos del frontend **más** los de la semántica core, todos
+  en la misma lista.
+- `result.ok` / `result.has_errors`: mismo significado que en `FrontendResult`.
+
+### Cómo se recorre el árbol sin reconstruirlo
+
+`symbol_collector.py` ya abrió un scope por cada nodo que lo necesita (función, clase,
+bloque, bucle, switch, catch), en la posición `(line, column)` de ese nodo. `CoreSemanticVisitor`
+arma una sola vez un diccionario `posición -> Scope` a partir de `SymbolTable.all_scopes()`
+y, al visitar un nodo, mueve un cursor (`_current`) a su scope correspondiente en vez de
+llamar a `SymbolTable.push()` — así nunca crea un scope nuevo ni duplica el árbol.
+
+Los tres módulos de reglas (`expression_rules.py`, `function_rules.py`,
+`control_flow_rules.py`) son funciones puras: reciben tipos ya inferidos (nunca el AST
+ni los scopes) y devuelven `(tipo_resultante, código_de_diagnóstico_o_None, detalle)`.
+Quien realmente escribe en la bolsa de diagnósticos es `CoreSemanticVisitor`, que es el
+único que conoce la posición real de cada nodo.
+
+### Catálogo de diagnósticos (`CPS-1xx`, de la semántica core)
+
+`diagnostics.py` es propiedad del frontend y su catálogo de mensajes (`_MESSAGES`) es
+exclusivamente `CPS-0xx` (hay un test del frontend que lo hace cumplir). Por eso la
+semántica core mantiene su **propio** catálogo en `compiler/core_semantic_visitor.py`
+(`_MESSAGES` local), reutilizando de `diagnostics.py` solo el mecanismo compartido:
+`Diagnostic`, `DiagnosticBag` y `Severity`.
+
+| Código | Severidad | Significado |
+|---|---|---|
+| CPS-100 | error | tipo incompatible en la inicialización/asignación de una variable, constante o atributo |
+| CPS-101 | error | variable/atributo sin tipo declarado y sin inicializador |
+| CPS-102 | error | reasignación de una constante |
+| CPS-103 | error | identificador no declarado |
+| CPS-104 | error | operandos incompatibles para `+`, `-`, `*`, `/` o `%` |
+| CPS-105 | error | operador relacional (`<`, `<=`, `>`, `>=`) con operandos no numéricos |
+| CPS-106 | error | operandos no comparables con `==` / `!=` |
+| CPS-107 | error | operador lógico (`&&`, `\|\|`) con operando no booleano |
+| CPS-108 | error | operando de `-` o `!` unario con tipo incompatible |
+| CPS-109 | error | condición no booleana en `if`/`while`/`do-while`/`for`/ternario |
+| CPS-110 | error | se intenta invocar algo que no es una función |
+| CPS-111 | error | número de argumentos incorrecto en una llamada |
+| CPS-112 | error | tipo de argumento incompatible con el parámetro |
+| CPS-113 | error | `return` incompatible con el tipo de retorno declarado |
+| CPS-114 | error | los `return` de una función sin anotación no tienen un tipo común |
+| CPS-115 | error | discriminante de `switch` de tipo no escalar (no es integer/string/boolean) |
+| CPS-116 | error | `case` incompatible con el tipo del discriminante |
+| CPS-117 | warning | código inalcanzable después de `return`/`break`/`continue` en el mismo bloque |
+| CPS-118 | warning\* | el operador ternario no tiene un tipo común entre sus dos ramas |
+
+\* CPS-118 se reporta con severidad de error (impide `result.ok`); solo CPS-117 es warning.
+
+### Decisiones de diseño relevantes (semántica core)
+
+- **Reglas ya cubiertas por el frontend no se repiten aquí.** `break`/`continue` fuera de
+  bucle, `return` fuera de función (`CPS-012`/`013`/`014`), funciones y clases duplicadas
+  (`CPS-020`/`021`) y parámetros duplicados (`CPS-022`) ya los valida
+  `symbol_collector.py` durante la construcción de scopes — repetirlos aquí violaría DRY.
+- **División con la semántica extendida (clases y arreglos).** `PropertyAccess`,
+  `IndexAccess`, `NewExpr`, `ThisExpr` y `ArrayLiteral` **no** reciben `inferred_type` en
+  esta etapa: se dejan en `None` a propósito para que la etapa siguiente (clases/arreglos)
+  los complete con la información de miembros y objetos que solo ella conoce. Esto es
+  posible porque `AstVisitor.generic_visit` (de `ast_nodes.py`) recorre igual sus
+  subexpresiones aunque este visitor no tenga un manejador propio para ellos — así una
+  llamada a método (`obj.metodo()`) o un acceso a arreglo (`a[i]`) siguen visitándose sin
+  que `CoreSemanticVisitor` tenga que conocer clases ni arreglos.
+- **Inferencia de retorno con recursión.** Cuando una función sin anotación de retorno se
+  llama a sí misma (o a otra función mutuamente recursiva sin anotación) antes de que su
+  cuerpo termine de recorrerse, su tipo de retorno todavía es `None`. Esa llamada resuelve
+  a tipo `ERROR` (que se absorbe en silencio en el resto de la expresión) en vez de forzar
+  un análisis de punto fijo — una limitación documentada y aceptada: el enunciado no exige
+  resolver ese caso, y una función *con* anotación de retorno nunca lo sufre (su tipo se
+  conoce desde la fase de firmas del frontend).
+- **Funciones anidadas dentro de un cuerpo (no top-level, no método).** `symbol_collector.py`
+  abre un scope para su cuerpo pero no la registra como símbolo en ningún scope (solo
+  predeclara nombres top-level). `CoreSemanticVisitor` sigue analizando su cuerpo con
+  normalidad, pero no puede validar sus `return` contra una firma que no existe, y una
+  llamada a esa función por nombre reporta `CPS-103`. Es una limitación conocida del
+  frontend, no de esta etapa — está fuera del alcance de Persona 2 modificar
+  `symbol_collector.py`.
+- **Igualdad de tipos por valor, no por identidad.** Los tipos primitivos (`INTEGER`,
+  `STRING`, `BOOLEAN`) son singletons en `types.py`, pero las reglas de esta etapa los
+  comparan con `==` (igualdad estructural de dataclass) y no con `is`, para que sigan
+  funcionando igual si algún día dejan de ser singletons únicos.
+
+### Estructura de la semántica core
+
+```
+compiler/
+  expression_rules.py     # tipos de operadores binarios/unarios, condiciones, ternario
+  function_rules.py       # validación de llamadas y de 'return' (incluye ReturnTracker)
+  control_flow_rules.py   # discriminante/case de switch, código muerto
+  core_semantic_visitor.py  # coordina el recorrido, catálogo CPS-1xx propio
+  core_semantics.py         # fachada: analyze (API congelada)
+tests/person2/
+  fixtures/{valid,invalid}/*.cps
+  test_*.py
+```
+
+### Ejecutar tests de la semántica core
+
+```bash
+pytest tests/person2 -v
+```
+
+Corren sobre el frontend real (`compiler.frontend.analyze_source`), no sobre mocks: cada
+test de integración arma su AST y su tabla de símbolos ejecutando el pipeline completo del
+frontend antes de correr `core_semantics.analyze`.
