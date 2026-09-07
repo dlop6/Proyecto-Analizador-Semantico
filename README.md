@@ -4,9 +4,10 @@ Proyecto de Construcción de Compiladores: analizador semántico para Compiscrip
 (subconjunto de TypeScript), en Python 3 + ANTLR4. El trabajo está dividido en
 etapas con dependencia secuencial (ver `docs/temp/` para la división completa).
 
-**Este README documenta el frontend y la semántica core** (parser, AST, tipos,
-tabla de símbolos; expresiones, funciones y control de flujo). La sección de
-integración/IDE se agrega cuando esa etapa del proyecto arranca.
+Este README documenta las 4 etapas completas: el frontend (parser, AST, tipos, tabla de
+símbolos), la semántica core (expresiones, funciones, control de flujo), la semántica
+extendida (clases, arreglos) y la integración final (visualización del AST + IDE). Para
+una vista de conjunto de cómo encajan entre sí, ver `ARCHITECTURE.md`.
 
 ## Requisitos
 
@@ -306,3 +307,208 @@ pytest tests/person2 -v
 Corren sobre el frontend real (`compiler.frontend.analyze_source`), no sobre mocks: cada
 test de integración arma su AST y su tabla de símbolos ejecutando el pipeline completo del
 frontend antes de correr `core_semantics.analyze`.
+
+## Semántica extendida (clases y arreglos)
+
+Consume exclusivamente `CoreSemanticResult` (ast, symbols, diagnostics) de la sección
+anterior. Completa exactamente los nodos que la semántica core deja con
+`inferred_type = None` a propósito: `PropertyAccess`, `IndexAccess`, `NewExpr`,
+`ThisExpr`, `ArrayLiteral`, y el `Assignment`/`Call` cuyo target/callee es uno de esos
+nodos (ver "División con la semántica extendida" más arriba).
+
+### Contrato congelado: `extended_semantics.analyze`
+
+```python
+from compiler.extended_semantics import analyze as analyze_extended
+from compiler.core_semantics import analyze as analyze_core
+from compiler.frontend import analyze_source
+
+result = analyze_extended(analyze_core(analyze_source(source))) -> ExtendedSemanticResult(ast, symbols, diagnostics)
+```
+
+- `ast` / `symbols`: exactamente los mismos objetos que trae el `CoreSemanticResult` de
+  entrada. Si `core_result.ast is None`, no corre nada y devuelve los diagnósticos de la
+  core tal cual.
+- `diagnostics`: los del frontend + los de la core + los propios, todos en la misma lista.
+- `result.ok` / `result.has_errors`: mismo significado que en las etapas anteriores.
+
+### Semántica de clases
+
+- **Herencia y ciclos**: ya resueltos por el frontend (`CPS-023`/`CPS-031`). Esta etapa
+  reusa `ClassSymbol.parent` a través de su propio `_ClassHierarchyView` (mismo patrón
+  que `symbol_collector.py`/`core_semantic_visitor.py`, ver `ARCHITECTURE.md`).
+- **Acceso a miembros** (`obj.prop`): usa `ClassSymbol.lookup_member`, que ya sube por la
+  cadena de herencia. Un atributo da su tipo; un método referenciado sin invocarlo da
+  `ERROR` en silencio (Compiscript no tiene funciones de primera clase, mismo criterio
+  que la core aplica a nombres de función top-level).
+- **Llamadas a método** (`obj.metodo(args)`) y **`new Clase(args)`**: validan aridad y
+  tipos de argumento reusando `function_rules.check_call` (no se reimplementa ese loop),
+  remapeando sus códigos al rango propio `CPS-2xx`. `new Clase(...)` valida contra el
+  constructor **efectivo** de la clase — el propio si lo declara, o el heredado si no
+  (una subclase sin `constructor` propio hereda el de su padre, como en Java/TypeScript).
+  El tipo resultante de `NewExpr` siempre es `ClassType(Clase)`, tenga o no errores de
+  argumentos.
+- **`this`**: la validación estructural (solo dentro de método/constructor) ya la hace el
+  frontend (`CPS-040`); esta etapa solo completa su tipo, `ClassType(clase_actual)`.
+- **Override de métodos**: firma exacta (misma aridad, mismos tipos de parámetro, mismo
+  tipo de retorno) contra `parent.lookup_member(nombre)`, sin variancia. Se valida como
+  un pre-pase sobre las clases del programa, antes de recorrer cuerpos.
+- **Subtipado en asignaciones**: ya resuelto por `types.is_assignable` con la jerarquía
+  correcta (subclase → padre permitido, al revés rechazado) — no se reimplementa.
+
+### Semántica de arreglos
+
+- **Literales homogéneos**: el tipo de `[e1, e2, ...]` es el supertipo común más
+  específico de sus elementos (`common_type` reducido par a par, misma lógica que el
+  ternario de la core generalizada a N elementos). Arreglos anidados salen gratis de
+  aplicar esa reducción sobre tipos ya inferidos de adentro hacia afuera.
+- **Literal vacío**: `[]` tiene el tipo comodín `EmptyArrayType`, ya asignable a
+  cualquier `ArrayType` (`types.py`) — así `let a: integer[] = [];` funciona sin
+  inferencia bidireccional real.
+- **Índices**: deben ser `integer` (`CPS-205`); no hay análisis estático de rangos
+  numéricos (fuera de alcance, regla 9 del PDF).
+- **`arr[i]` como destino de asignación**: resuelve el tipo del elemento igual que una
+  lectura y valida `is_assignable` contra el valor asignado.
+- **Arreglos invariantes**: heredado de `types.is_assignable` — `Perro[]` no es
+  asignable a `Animal[]` aunque `Perro` herede de `Animal`.
+
+### Catálogo de diagnósticos (`CPS-2xx`, de la semántica extendida)
+
+| Código | Severidad | Significado |
+|---|---|---|
+| CPS-200 | error | miembro inexistente (acceso o llamada a método) |
+| CPS-201 | error | se intenta invocar un miembro que no es un método |
+| CPS-202 | error | override con firma distinta a la heredada |
+| CPS-203 | error | tipo incompatible al asignar un atributo (`obj.prop = valor`) |
+| CPS-204 | error | tipo incompatible al asignar un elemento de arreglo (`arr[i] = valor`) |
+| CPS-205 | error | el índice de un arreglo no es `integer` |
+| CPS-206 | error | se intenta indexar algo que no es un arreglo |
+| CPS-207 | error | los elementos de un literal de arreglo no tienen tipo común |
+| CPS-208 | error | acceso a miembro/llamada a método sobre algo que no es un objeto |
+| CPS-209 | error | tipo incompatible en una declaración/asignación cuyo valor tipa esta etapa (ver más abajo) |
+| CPS-210 | error | aridad incorrecta en `new Clase(...)` |
+| CPS-211 | error | argumento incompatible en `new Clase(...)` |
+| CPS-212 | error | aridad incorrecta en llamada a método |
+| CPS-213 | error | argumento incompatible en llamada a método |
+
+### Decisiones de diseño relevantes (semántica extendida)
+
+- **Sin cursor de scopes por posición** (a diferencia de la core): este visitor nunca
+  hace `lookup` de identificadores, así que no necesita reconstruir `_scope_by_pos`
+  (YAGNI). Ver `ARCHITECTURE.md` para el detalle.
+- **`CPS-209` cierra un hueco real de la arquitectura de dos pasadas**: la core valida
+  `let x: T = expr;`/`x = expr;` en el momento en que los visita — si `expr` es un
+  `NewExpr`/`ArrayLiteral`/`PropertyAccess`/`IndexAccess`/llamada a método, su tipo
+  todavía es `None` en ese momento, así que la comparación se salta por completo (no se
+  absorbe como "compatible": nunca se valida). Esta etapa cierra ese caso puntual sin
+  tocar `core_semantic_visitor.py` ni duplicar ninguna validación que la core ya haya
+  hecho bien (ver el docstring de `extended_semantic_visitor.py` para el detalle exacto).
+  Un caso análogo con `return expr;` queda como limitación conocida (ver
+  `ARCHITECTURE.md`, "Limitaciones conocidas").
+- **Reuso de `function_rules.check_call`** en `class_rules.py` para llamadas a
+  constructor y a método, remapeando sus códigos `CPS-1xx` a `CPS-2xx` propios — evita
+  duplicar el loop de validación de aridad/tipos sin mezclar catálogos de etapas
+  distintas.
+- **Firma exacta al hacer override**, sin variancia — el enunciado pide "firma exacta",
+  no covarianza/contravarianza (YAGNI).
+
+### Estructura de la semántica extendida
+
+```
+compiler/
+  class_rules.py               # tipos de miembros, llamadas a metodo/constructor, override
+  array_rules.py                # tipos de literales de arreglo y acceso por indice
+  extended_semantic_visitor.py   # coordina el recorrido, catalogo CPS-2xx propio
+  extended_semantics.py           # fachada: analyze (API congelada)
+tests/person3/
+  fixtures/{valid,invalid}/*.cps
+  test_*.py
+```
+
+### Ejecutar tests de la semántica extendida
+
+```bash
+pytest tests/person3 -v
+```
+
+## Visualización del AST
+
+`compiler/ast_visualizer.py` genera una representación visual del AST propio en SVG, vía
+[Graphviz](https://graphviz.org/) (necesita el binario `dot` instalado en el sistema,
+además del paquete `graphviz` de Python). Recorre cualquier nodo con la misma
+introspección genérica que usa `AstVisitor.generic_visit` (`dataclasses.fields`), así que
+agregar un nodo nuevo al AST no requiere tocar este archivo.
+
+```python
+from compiler.ast_visualizer import render_svg, to_dot
+from compiler.frontend import analyze_source
+
+ast = analyze_source(source).ast
+to_dot(ast)      # fuente DOT como string, no necesita 'dot' instalado
+render_svg(ast)  # SVG como string, corre el binario 'dot'
+```
+
+Si `dot` no está disponible en el entorno, `render_svg` lanza
+`graphviz.ExecutableNotFound` — quien la llama decide cómo degradar (`compiler_service.
+compile_source` la atrapa y deja `ast_svg=None`, sin afectar el resto de la compilación).
+
+## Integración: `compiler_service.compile_source`
+
+Único compositor del pipeline completo (frontend → semántica core → semántica extendida
+→ visualización). Es el único punto que el IDE (o cualquier otro cliente) debería usar
+para compilar código Compiscript — nunca se instancian las etapas por separado fuera de
+este módulo (DIP).
+
+```python
+from compiler.compiler_service import compile_source
+
+result = compile_source(source) -> CompilationResult(success, diagnostics, ast_svg)
+```
+
+- `success`: `True` si hubo AST (sin error de sintaxis) y cero diagnósticos de error en
+  ninguna de las 3 etapas.
+- `diagnostics`: la lista completa y ordenada de las 3 etapas.
+- `ast_svg`: el SVG del AST como string, o `None` si hubo error de sintaxis o si
+  Graphviz/`dot` no está disponible en el entorno.
+
+## IDE
+
+Interfaz web mínima (Flask, una sola pantalla) para pegar código Compiscript, compilarlo
+y ver diagnósticos + el AST como SVG. Sin autenticación, sin persistencia, sin
+autocompletado, sin debugger — exactamente el alcance que pide el enunciado para esta
+etapa. Cero lógica semántica en `ide/app.py` ni en el template: la única función con
+lógica real llama a `compiler_service.compile_source` y devuelve su resultado como JSON.
+
+### Levantar el IDE
+
+```bash
+flask --app ide.app run
+# o
+python -m ide.app
+```
+
+Abrir `http://127.0.0.1:5000/` en el navegador. El textarea trae un ejemplo mínimo;
+"Compilar" hace `POST /api/compile` con `{"source": "..."}` y pinta la respuesta
+(`{success, diagnostics[], ast_svg}`) en los paneles de diagnósticos y AST.
+
+### Estructura del IDE
+
+```
+ide/
+  app.py                 # rutas: GET / , POST /api/compile
+  templates/index.html   # una sola pantalla: editor + diagnosticos + ast
+  static/style.css
+  static/app.js           # fetch a /api/compile, sin logica semantica
+```
+
+## Cómo ejecutar todo
+
+```bash
+pip install -r requirements.txt
+pytest tests -q          # las 4 etapas juntas, desde la raiz del repositorio
+flask --app ide.app run  # opcional: levantar el ide para probar interactivamente
+```
+
+`pytest tests -q` corre los tests de las 4 etapas (frontend, semántica core, semántica
+extendida, integración) en un solo comando, tal como lo exige el criterio de aceptación
+del proyecto ("pytest completo pasa desde la raíz del repositorio").

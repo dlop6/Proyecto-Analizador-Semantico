@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Compiscript IDE</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <h1>Compiscript &mdash; Analizador Semántico</h1>
+    <button id="compile-btn" type="button">Compilar</button>
+  </header>
+
+  <main>
+    <section id="editor-pane">
+      <h2>Código fuente</h2>
+      <textarea id="source" spellcheck="false" placeholder="Escribí tu programa Compiscript acá...">let x: integer = 1;
+print(x);
+</textarea>
+    </section>
+
+    <section id="diagnostics-pane">
+      <h2>Diagnósticos</h2>
+      <p id="status"></p>
+      <ul id="diagnostics-list"></ul>
+    </section>
+
+    <section id="ast-pane">
+      <h2>AST</h2>
+      <div id="ast-container"><p class="hint">Compilá para ver el árbol.</p></div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
