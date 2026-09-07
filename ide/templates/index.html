@@ -11,7 +11,7 @@
     <button id="compile-btn" type="button">Compilar</button>
   </header>
 
-  <main>
+  <main id="workspace" class="ast-empty">
     <section id="editor-pane">
       <h2>Código fuente</h2>
       <div class="editor-actions">
@@ -20,21 +20,46 @@
         <label class="file-button" for="source-file">Abrir archivo .cps</label>
         <span id="file-name" aria-live="polite">Sin archivo seleccionado</span>
       </div>
-      <p id="file-status" class="file-status" aria-live="polite"></p>
-      <textarea id="source" spellcheck="false" placeholder="Escribí tu programa Compiscript acá...">let x: integer = 1;
+      <p id="file-status" class="file-status" role="status" aria-live="polite" aria-atomic="true"></p>
+
+      <label for="source" class="visually-hidden">Código fuente Compiscript</label>
+      <div id="editor-shell" class="editor-shell">
+        <pre id="line-numbers" aria-hidden="true">1</pre>
+        <pre id="highlight-layer" aria-hidden="true"><code id="highlight-code"></code></pre>
+        <textarea id="source" spellcheck="false" wrap="off"
+                  placeholder="Escribí tu programa Compiscript acá...">let x: integer = 1;
 print(x);
 </textarea>
+      </div>
     </section>
 
     <section id="diagnostics-pane">
       <h2>Diagnósticos</h2>
-      <p id="status"></p>
+      <p id="status" role="status" aria-live="polite" aria-atomic="true"></p>
+      <div class="diagnostic-actions">
+        <div id="diagnostic-filters" role="group" aria-label="Filtrar diagnósticos">
+          <button type="button" class="filter-btn active" data-filter="all" aria-pressed="true">Todos</button>
+          <button type="button" class="filter-btn" data-filter="error" aria-pressed="false">Errores</button>
+          <button type="button" class="filter-btn" data-filter="warning" aria-pressed="false">Advertencias</button>
+        </div>
+        <button id="copy-diagnostics-btn" type="button" disabled>Copiar diagnósticos</button>
+      </div>
+      <p id="copy-status" class="utility-status" role="status" aria-live="polite"></p>
       <ul id="diagnostics-list"></ul>
     </section>
 
     <section id="ast-pane">
-      <h2>AST</h2>
-      <div id="ast-container"><p class="hint">Compilá para ver el árbol.</p></div>
+      <div class="panel-heading">
+        <h2>AST</h2>
+        <div id="ast-controls" class="ast-controls" role="group" aria-label="Controles del AST">
+          <button id="ast-zoom-out" type="button" aria-label="Reducir AST" title="Reducir AST" disabled>&minus;</button>
+          <button id="ast-zoom-in" type="button" aria-label="Ampliar AST" title="Ampliar AST" disabled>+</button>
+          <button id="ast-reset" type="button" aria-label="Restablecer AST al 100 por ciento" title="Restablecer AST" disabled>100%</button>
+          <button id="ast-fit" type="button" aria-label="Ajustar AST al panel" title="Ajustar AST" disabled>Ajustar</button>
+          <button id="ast-download" type="button" aria-label="Descargar AST como SVG" title="Descargar SVG" disabled>SVG</button>
+        </div>
+      </div>
+      <div id="ast-container"><p class="hint">Compilá para generar el árbol.</p></div>
     </section>
   </main>
 

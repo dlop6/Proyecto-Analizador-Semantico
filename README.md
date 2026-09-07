@@ -470,12 +470,14 @@ result = compile_source(source) -> CompilationResult(success, diagnostics, ast_s
 ## IDE
 
 Interfaz web mínima (Flask, una sola pantalla) para cargar un archivo `.cps` o pegar
-código Compiscript, compilarlo y ver diagnósticos + el AST como SVG. El selector valida
-la extensión y el límite de 5 MiB antes de leer localmente el archivo; cargarlo no lo
-compila automáticamente, por lo que se puede editar antes de usar “Compilar”. Sin autenticación, sin persistencia, sin
-autocompletado, sin debugger — exactamente el alcance que pide el enunciado para esta
-etapa. Cero lógica semántica en `ide/app.py` ni en el template: la única función con
-lógica real llama a `compiler_service.compile_source` y devuelve su resultado como JSON.
+código Compiscript, compilarlo y ver diagnósticos + el AST como SVG. El editor tiene
+resaltado léxico local, números de línea y navegación desde cada diagnóstico; esos
+colores no sustituyen al análisis semántico del compilador. El selector valida la
+extensión y el límite de 5 MiB antes de leer localmente el archivo; cargarlo no lo
+compila automáticamente, por lo que se puede editar antes de usar “Compilar”. Sin
+autenticación, persistencia, autocompletado ni debugger. Cero lógica semántica en
+`ide/app.py` ni en el template: la única función con lógica real llama a
+`compiler_service.compile_source` y devuelve su resultado como JSON.
 
 ### Levantar el IDE
 
@@ -488,6 +490,13 @@ python -m ide.app
 Abrir `http://127.0.0.1:5000/` en el navegador. El textarea trae un ejemplo mínimo;
 “Abrir archivo .cps” carga una fuente local y “Compilar” hace `POST /api/compile` con `{"source": "..."}` y pinta la respuesta
 (`{success, diagnostics[], ast_svg}`) en los paneles de diagnósticos y AST.
+
+- `Ctrl+Enter` (o `Cmd+Enter`) compila sin usar el ratón.
+- Los filtros separan errores y advertencias; “Copiar diagnósticos” conserva código,
+  posición y mensaje.
+- El nombre del archivo indica si su contenido fue modificado localmente.
+- El panel AST distingue errores de frontend de una ausencia de Graphviz e incluye zoom,
+  ajuste y descarga del SVG.
 
 ### Estructura del IDE
 

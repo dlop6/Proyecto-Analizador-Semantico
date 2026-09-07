@@ -86,11 +86,15 @@ extendida.
 
 El IDE Flask solo delega en `compile_source`. El cliente construye diagnosticos con
 `textContent`, por lo que el codigo fuente del usuario nunca se interpreta como HTML.
-Todas las respuestas de la API incluyen `success`, `diagnostics`, `ast_svg` y `error`.
-El limite HTTP se aplica antes de deserializar JSON, y el compilador conserva su limite
-de fuente como segunda defensa. El selector `.cps` lee localmente con `FileReader`,
-valida extensión y tamaño con el mismo límite del compilador y solo envía el texto al
-servidor cuando el usuario pulsa “Compilar”.
+El editor conserva un `textarea` como fuente de verdad y una capa visual sincronizada
+de resaltado léxico y números de línea. Esta capa solo reconoce tokens de la gramática:
+no consulta símbolos ni decide validez semántica. Todas las respuestas de la API incluyen
+`success`, `diagnostics`, `ast_svg` y `error`. El limite HTTP se aplica antes de
+deserializar JSON, y el compilador conserva su limite de fuente como segunda defensa.
+El selector `.cps` lee localmente con `FileReader`, valida extensión y tamaño con el
+mismo límite del compilador y solo envía el texto al servidor cuando el usuario pulsa
+“Compilar”. La UI permite navegar diagnósticos, filtrarlos, copiarlos y controlar el SVG
+sin cambiar la API ni los contratos públicos.
 
 ## Limites intencionales
 

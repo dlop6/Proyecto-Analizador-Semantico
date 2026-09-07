@@ -49,6 +49,51 @@ def test_cliente_valida_extension_y_tamano_antes_de_cargar_archivo():
     assert "file.size > maxSourceBytes" in contents
 
 
+def test_index_ofrece_editor_resaltado_accesible_y_numeros_de_linea(client):
+    response = client.get("/")
+    assert b'id="editor-shell"' in response.data
+    assert b'id="line-numbers"' in response.data
+    assert b'id="highlight-layer"' in response.data
+    assert b'aria-hidden="true"' in response.data
+    assert b'<label for="source"' in response.data
+
+
+def test_index_ofrece_acciones_de_diagnosticos_y_ast(client):
+    response = client.get("/")
+    for identifier in (
+        b"diagnostic-filters",
+        b"copy-diagnostics-btn",
+        b"ast-zoom-in",
+        b"ast-zoom-out",
+        b"ast-reset",
+        b"ast-fit",
+        b"ast-download",
+    ):
+        assert identifier in response.data
+
+
+def test_cliente_tiene_resaltado_seguro_y_navegacion_de_diagnosticos():
+    source = (app.root_path + "/static/app.js")
+    with open(source, encoding="utf-8") as javascript:
+        contents = javascript.read()
+    assert "requestAnimationFrame" in contents
+    assert "highlightCodeEl.replaceChildren" in contents
+    assert "token.textContent" in contents
+    assert "setSelectionRange" in contents
+    assert "diagnostic-jump" in contents
+
+
+def test_cliente_ofrece_atajo_filtros_copia_y_controles_ast():
+    source = (app.root_path + "/static/app.js")
+    with open(source, encoding="utf-8") as javascript:
+        contents = javascript.read()
+    assert "event.ctrlKey || event.metaKey" in contents
+    assert "navigator.clipboard.writeText" in contents
+    assert "URL.createObjectURL" in contents
+    assert "astScale" in contents
+    assert "loadedSource" in contents
+
+
 def test_compile_programa_valido_devuelve_success_true(client):
     response = client.post("/api/compile", json={"source": "let x: integer = 1;\nprint(x);"})
     assert response.status_code == 200
