@@ -94,6 +94,14 @@ def test_cliente_ofrece_atajo_filtros_copia_y_controles_ast():
     assert "loadedSource" in contents
 
 
+def test_cliente_intercepta_tab_para_indentar_el_editor():
+    source = (app.root_path + "/static/app.js")
+    with open(source, encoding="utf-8") as javascript:
+        contents = javascript.read()
+    assert 'event.key === "Tab"' in contents
+    assert 'sourceEl.setRangeText("    ", start, end, "end")' in contents
+
+
 def test_compile_programa_valido_devuelve_success_true(client):
     response = client.post("/api/compile", json={"source": "let x: integer = 1;\nprint(x);"})
     assert response.status_code == 200

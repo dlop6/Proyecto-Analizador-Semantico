@@ -545,6 +545,16 @@
   });
   sourceEl.addEventListener("scroll", syncEditorScroll);
   sourceEl.addEventListener("keydown", (event) => {
+    if (event.key === "Tab") {
+      event.preventDefault();
+      // El textarea es la fuente de verdad: insertar espacios conserva el
+      // comportamiento de un editor sin dejar que el navegador cambie el foco.
+      const start = sourceEl.selectionStart;
+      const end = sourceEl.selectionEnd;
+      sourceEl.setRangeText("    ", start, end, "end");
+      sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
       compile();
