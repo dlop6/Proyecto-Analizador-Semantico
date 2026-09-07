@@ -1,0 +1,123 @@
+:root {
+  color-scheme: light dark;
+  --bg: #1e1e2e;
+  --panel: #282838;
+  --border: #3a3a4d;
+  --text: #e0e0f0;
+  --muted: #9090a8;
+  --error: #f28b82;
+  --warning: #fdd663;
+  --accent: #7aa2f7;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
+
+#compile-btn {
+  background: var(--accent);
+  color: #10121c;
+  border: none;
+  padding: 0.5rem 1.25rem;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#compile-btn:hover { filter: brightness(1.1); }
+#compile-btn:disabled { opacity: 0.6; cursor: wait; }
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+section {
+  background: var(--panel);
+  padding: 0.75rem 1rem;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+section h2 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0 0 0.5rem 0;
+}
+
+#source {
+  flex: 1;
+  resize: none;
+  background: #14141f;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+#status { margin: 0 0 0.5rem 0; font-size: 0.85rem; }
+#status.ok { color: #81c995; }
+#status.fail { color: var(--error); }
+
+#diagnostics-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  flex: 1;
+}
+
+#diagnostics-list li {
+  padding: 0.5rem 0.6rem;
+  margin-bottom: 0.4rem;
+  border-radius: 6px;
+  border-left: 3px solid var(--error);
+  background: rgba(242, 139, 130, 0.08);
+  font-size: 0.8rem;
+}
+
+#diagnostics-list li.warning {
+  border-left-color: var(--warning);
+  background: rgba(253, 214, 99, 0.08);
+}
+
+#diagnostics-list li .pos { color: var(--muted); }
+#diagnostics-list li .code { color: var(--accent); font-weight: 700; }
+
+#ast-container {
+  flex: 1;
+  overflow: auto;
+}
+
+#ast-container svg { max-width: 100%; height: auto; }
+
+.hint { color: var(--muted); font-size: 0.85rem; }
