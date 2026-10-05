@@ -242,17 +242,24 @@ class AstBuilder(CompiscriptVisitor):
     def visitFunctionDeclaration(self, ctx):
         line, col = _pos(ctx)
         name = ctx.Identifier().getText()
-        params = []
-        if ctx.parameters():
-            params = [self.visit(p) for p in ctx.parameters().parameter()]
-        return_type = self._build_type(ctx.type_()) if ctx.type_() else None
-        body = self.visit(ctx.block())
         # constructor se determina por nombre Y por estar dentro de un classMember,
         # no por nombre solo (una funcion top-level llamada "constructor" es normal)
-        is_constructor = self._in_class_member and name == CONSTRUCTOR_NAME
+        is_method = self._in_class_member
+        is_constructor = is_method and name == CONSTRUCTOR_NAME
+        # el cuerpo ya no es miembro de la clase: una funcion anidada adentro es una
+        # funcion normal, no otro metodo
+        self._in_class_member = False
+        try:
+            params = []
+            if ctx.parameters():
+                params = [self.visit(p) for p in ctx.parameters().parameter()]
+            return_type = self._build_type(ctx.type_()) if ctx.type_() else None
+            body = self.visit(ctx.block())
+        finally:
+            self._in_class_member = is_method
         return FunctionDecl(
             line=line, column=col, name=name, params=params, return_type=return_type,
-            body=body, is_constructor=is_constructor, is_method=self._in_class_member,
+            body=body, is_constructor=is_constructor, is_method=is_method,
         )
 
     def visitParameter(self, ctx):

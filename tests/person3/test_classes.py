@@ -81,25 +81,23 @@ def test_padre_no_asignable_a_variable_de_tipo_subclase():
     let p: Perro = new Animal();
     """
     result = analyze_full(source)
-    # CPS-100 (core) NO puede detectar esto: en el momento en que la core visita este
-    # VarDecl, NewExpr.inferred_type todavia es None (limitacion documentada de la
-    # arquitectura de dos pasadas). lo cierra esta etapa con su propio codigo, CPS-209
-    # (ver docstring de extended_semantic_visitor.py).
-    assert "CPS-209" in codes_of(result)
+    # en la primera pasada la core no conoce el tipo del new; la re-pasada de
+    # extended_semantics.analyze si, y ahi lo reporta una sola vez como CPS-100
+    assert [d.code for d in result.diagnostics] == ["CPS-100"]
 
 
-# ---------- hueco de la arquitectura de dos pasadas: declaracion y reasignacion ----------
+# ---------- declaracion y reasignacion con valores que tipa esta etapa ----------
 
-def test_declaracion_con_tipo_incompatible_via_new_reporta_cps209():
+def test_declaracion_con_tipo_incompatible_via_new_reporta_cps100_una_vez():
     source = "class A {}\nclass B {}\nlet a: A = new B();"
     result = analyze_full(source)
-    assert "CPS-209" in codes_of(result)
+    assert [d.code for d in result.diagnostics] == ["CPS-100"]
 
 
-def test_reasignacion_con_tipo_incompatible_via_new_reporta_cps209():
+def test_reasignacion_con_tipo_incompatible_via_new_reporta_cps100_una_vez():
     source = "class A {}\nclass B {}\nlet a: A = new A();\na = new B();"
     result = analyze_full(source)
-    assert "CPS-209" in codes_of(result)
+    assert [d.code for d in result.diagnostics] == ["CPS-100"]
 
 
 def test_declaracion_con_tipo_compatible_via_new_no_reporta_nada():
@@ -108,10 +106,10 @@ def test_declaracion_con_tipo_compatible_via_new_no_reporta_nada():
     assert result.diagnostics == []
 
 
-def test_declaracion_de_arreglo_con_tipo_incompatible_reporta_cps209():
+def test_declaracion_de_arreglo_con_tipo_incompatible_reporta_cps100_una_vez():
     source = "let a: string[] = [1, 2, 3];"
     result = analyze_full(source)
-    assert "CPS-209" in codes_of(result)
+    assert [d.code for d in result.diagnostics] == ["CPS-100"]
 
 
 # ---------- override valido no genera diagnostico ----------

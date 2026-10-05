@@ -36,6 +36,11 @@ class ExtendedSemanticResult:
         return self.ast is not None and not self.has_errors
 
 
+# el pdf del proyecto 02 le dice "SemanticResult" al resultado semantico final. es el
+# mismo tipo, no otro contrato: asi el ir se programa con el nombre del pdf sin adivinar.
+SemanticResult = ExtendedSemanticResult
+
+
 def _walk_nodes(value):
     if isinstance(value, Node):
         yield value

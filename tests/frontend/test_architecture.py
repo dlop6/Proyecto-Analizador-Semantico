@@ -24,23 +24,42 @@ _ALLOWED_IMPORTS = {
 }
 
 
+def _is_type_checking_block(node: ast.AST) -> bool:
+    # lo de adentro de `if TYPE_CHECKING:` es solo para anotaciones, no es dependencia real
+    return isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING"
+
+
+def _runtime_nodes(node: ast.AST):
+    for child in ast.iter_child_nodes(node):
+        if _is_type_checking_block(child):
+            continue
+        yield child
+        yield from _runtime_nodes(child)
+
+
 def _local_imports(py_file: Path) -> set[str]:
-    """nombres de modulos hermanos (dentro de compiler/) que importa este archivo."""
+    """nombres de modulos hermanos (dentro de compiler/) que importa este archivo en runtime."""
     tree = ast.parse(py_file.read_text(encoding="utf-8"))
     names: set[str] = set()
-    for node in ast.walk(tree):
+    for node in _runtime_nodes(tree):
         if isinstance(node, ast.ImportFrom):
-            # imports relativos tipo "from . import x" o "from .types import y"
-            if node.module and node.level >= 1:
+            if node.level == 0 and node.module and node.module.startswith("compiler."):
+                names.add(node.module.split(".")[1])
+            elif node.level >= 1 and node.module:
                 names.add(node.module.split(".")[0])
-            elif node.level >= 1 and node.module is None:
-                for alias in node.names:
-                    names.add(alias.name)
+            elif node.level >= 1:
+                names.update(alias.name for alias in node.names)
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name.startswith("compiler."):
                     names.add(alias.name.split(".")[1])
     return names
+
+
+def test_el_detector_ve_los_imports_reales():
+    # antes este detector no veia `from compiler.x import y` y el test pasaba en vacio
+    assert {"ast_builder", "symbol_collector", "generated"} <= _local_imports(COMPILER_DIR / "frontend.py")
+    assert _local_imports(COMPILER_DIR / "scopes.py") == {"symbols"}
 
 
 def test_sin_ciclos_de_import_entre_modulos_de_compiler():

@@ -269,3 +269,86 @@ def test_parametros_quedan_marcados_is_param():
     fn_scope = next(s for s in table.all_scopes() if s.kind == ScopeKind.FUNCTION)
     assert fn_scope.symbols["a"].is_param is True
     assert fn_scope.symbols["b"].is_param is True
+
+
+# ---------- gate 0 del proyecto 02: la tabla tiene que servir para armar frames ----------
+
+def _scope_named(table, name):
+    return next(s for s in table.all_scopes() if s.name == name)
+
+
+def test_funcion_top_level_apunta_a_su_scope_y_comparte_parametros():
+    table, diag = analyze("function f(a: integer, b: string) { let x: integer = 1; }")
+    assert list(diag) == []
+    fn = table.global_scope.lookup("f")
+    assert fn.scope is _scope_named(table, "function:f")
+    for param in fn.params:
+        assert param is fn.scope.symbols[param.name]
+
+
+def test_funcion_anidada_apunta_a_su_scope_y_comparte_parametros():
+    table, _ = analyze("function f() { function g(n: integer): integer { return n; } }")
+    g = _scope_named(table, "function:f").symbols["g"]
+    assert g.scope is _scope_named(table, "function:g")
+    assert g.params[0] is g.scope.symbols["n"]
+
+
+def test_metodo_y_constructor_apuntan_a_su_scope_y_comparten_parametros():
+    table, diag = analyze(
+        "class A { let v: integer; "
+        "function constructor(v: integer) { this.v = v; } "
+        "function suma(k: integer): integer { return k; } }"
+    )
+    assert list(diag) == []
+    cls = table.global_scope.lookup("A")
+    for name in ("constructor", "suma"):
+        method = cls.methods[name]
+        assert method.scope is _scope_named(table, f"function:{name}")
+        assert method.params[0] is method.scope.symbols[method.params[0].name]
+
+
+def test_parametro_duplicado_no_cambia_la_aridad():
+    table, diag = analyze("function f(a: integer, a: integer) {}")
+    assert "CPS-022" in codes_of(diag)
+    fn = table.global_scope.lookup("f")
+    assert fn.arity == 2
+    assert fn.params[0] is fn.scope.symbols["a"]
+
+
+def test_funcion_top_level_duplicada_no_pisa_la_firma_de_la_primera():
+    table, diag = analyze("function f(a: integer) {} function f(a: integer, b: integer) {}")
+    assert "CPS-020" in codes_of(diag)
+    assert table.global_scope.lookup("f").arity == 1
+
+
+def test_funcion_anidada_con_nombre_de_parametro_es_redeclaracion():
+    _, diag = analyze("function f(g: integer) { function g() {} }")
+    assert "CPS-020" in codes_of(diag)
+
+
+def test_funcion_anidada_que_sombrea_a_la_exterior_es_valida():
+    _, diag = analyze("function f() { function f() {} }")
+    assert list(diag) == []
+
+
+def test_clase_dentro_de_funcion_es_error_explicito():
+    # antes pasaba como valida sin ClassSymbol ni this: no habia como armarle un layout
+    _, diag = analyze("function f() { class L { function m() {} } }")
+    assert "CPS-024" in codes_of(diag)
+
+
+def test_clase_dentro_de_bloque_top_level_es_error_explicito():
+    _, diag = analyze("{ class L {} }")
+    assert "CPS-024" in codes_of(diag)
+
+
+def test_clase_top_level_no_reporta_cps024():
+    _, diag = analyze("class A {} class B : A {}")
+    assert "CPS-024" not in codes_of(diag)
+
+
+def test_clase_local_homonima_no_le_pisa_el_scope_a_la_top_level():
+    table, diag = analyze("class A {} function f() { class A {} }")
+    assert "CPS-024" in codes_of(diag)
+    top = table.global_scope.lookup("A")
+    assert top.scope.parent is table.global_scope

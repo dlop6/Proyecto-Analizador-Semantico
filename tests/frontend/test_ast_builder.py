@@ -208,6 +208,22 @@ def test_constructor_dentro_de_clase():
     assert ctor.is_method is True
 
 
+def test_funcion_anidada_dentro_de_metodo_no_es_metodo():
+    # el flag de "estoy en una clase" no debe filtrarse al cuerpo del metodo
+    ast, _ = build("class A { function m() { function h(): integer { return 1; } } }")
+    method = ast.statements[0].members[0]
+    nested = method.body.statements[0]
+    assert method.is_method is True
+    assert nested.is_method is False
+    assert nested.is_constructor is False
+
+
+def test_funcion_llamada_constructor_anidada_en_metodo_no_es_constructor():
+    ast, _ = build("class A { function m() { function constructor() {} } }")
+    nested = ast.statements[0].members[0].body.statements[0]
+    assert nested.is_constructor is False
+
+
 def test_function_constructor_top_level_no_es_constructor():
     ast, _ = build("function constructor() {}")
     fn = ast.statements[0]

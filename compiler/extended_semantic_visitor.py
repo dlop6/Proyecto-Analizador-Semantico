@@ -12,8 +12,7 @@ PropertyAccess, IndexAccess, NewExpr, ThisExpr, ArrayLiteral, y el Assignment/Ca
 target/callee es uno de esos nodos. todo lo demas (BinaryOp, if/while/for, literales,
 identificadores...) ya quedo resuelto por CoreSemanticVisitor y no se vuelve a tocar: se
 deja que AstVisitor.generic_visit baje solo por esos nodos. VarDecl SI tiene una entrada
-propia, pero solo para cerrar un hueco puntual de la arquitectura de dos pasadas (ver mas
-abajo) -- no repite ninguna validacion que la core ya haya hecho.
+propia, pero solo para reportar un [] sin tipo de contexto (CPS-214).
 
 diferencia deliberada con CoreSemanticVisitor: este visitor NO arma un cursor de scopes
 por posicion (`_scope_by_pos`). ese mecanismo existe en la core para resolver
@@ -26,21 +25,12 @@ ClassDecl, y para eso alcanza con guardar/restaurar un atributo simple
 (`self._current_class`), igual que hace CoreSemanticVisitor con el suyo. construir el
 cursor de scopes completo solo para no usarlo violaria yagni.
 
-nota sobre un hueco real de la arquitectura de dos pasadas (documentado en el README,
-seccion "Semantica core > Division con la semantica extendida" y en el handoff, 4.4):
-`CoreSemanticVisitor._check_declared_initializer` valida `let x: T = expr;` y
-`x = expr;` usando `expr.inferred_type` en el momento en que la CORE los visita -- si
-`expr` es un NewExpr/ArrayLiteral/PropertyAccess/IndexAccess/llamada a metodo, ese tipo
-todavia es None en ese momento (esta etapa no corrio todavia), asi que la comparacion se
-salta por completo, NO se absorbe como "compatible": nunca se valida. Como este visitor
-corre despues y sabe leer el declared_type sintactico (`_resolve_declared_type`, mismo
-calculo que `symbol_collector._resolve_type` con los mismos `self._classes`) y el tipo
-que un `Assignment.target` Identifier ya trae cacheado (`target.inferred_type`, que la
-core siempre escribe, incluso cuando no llego a validar nada), `_visit_var_decl` y la
-rama Identifier de `_visit_assignment` cierran ese hueco especificamente para las
-expresiones que son responsabilidad exclusiva de esta etapa (`_is_extended_typed`), sin
-tocar ni duplicar nada que la core ya haya validado bien (evita reportar el mismo error
-dos veces con codigos distintos).
+nota sobre `let x: T = expr;` y `x = expr;` cuando `expr` es un NewExpr/ArrayLiteral/
+PropertyAccess/IndexAccess/llamada a metodo: en la primera pasada la core ve ese tipo en
+None y se salta la comparacion. extended_semantics.analyze despues alterna core y
+extendida hasta un punto fijo, asi que la core vuelve a pasar con el tipo ya puesto por
+esta etapa y reporta CPS-100. por eso aca no se valida esa compatibilidad: hacerlo era
+reportar la misma causa dos veces (antes salia CPS-209 junto a CPS-100).
 
 catalogo de mensajes: CPS-2xx esta reservado a esta etapa (frontend usa CPS-0xx, la
 semantica core CPS-1xx). mismo criterio que core_semantic_visitor.py: catalogo propio
@@ -51,22 +41,16 @@ from __future__ import annotations
 
 from compiler.array_rules import check_array_literal, check_index_access, is_valid_index_type
 from compiler.ast_nodes import (
-    ArrayLiteral, Assignment, AstVisitor, Call, ClassDecl, Expr, FunctionDecl, Identifier,
-    IndexAccess, NewExpr, Program, PropertyAccess, ThisExpr, TypeRef, VarDecl,
+    ArrayLiteral, Assignment, AstVisitor, Call, ClassDecl, Expr, FunctionDecl,
+    IndexAccess, NewExpr, Program, PropertyAccess, ThisExpr, VarDecl,
 )
 from compiler.class_rules import check_method_call, check_new_call, check_override, check_property_access
 from compiler.diagnostics import Diagnostic, DiagnosticBag, Severity
 from compiler.scopes import SymbolTable
 from compiler.symbols import ClassSymbol, FunctionSymbol, VariableSymbol
 from compiler.types import (
-    ArrayType, BOOLEAN, ClassHierarchy, ClassType, ERROR, EmptyArrayType, ErrorType, INTEGER, STRING, Type,
-    is_assignable,
+    ClassHierarchy, ClassType, ERROR, EmptyArrayType, ErrorType, Type, is_assignable,
 )
-
-# nombres de tipo primitivo tal como aparecen en una TypeRef sintactica. mismo mapeo que
-# symbol_collector._base_type_name_to_type, duplicado a proposito (3 lineas, sin logica)
-# para no depender de un helper privado de un modulo ajeno.
-_PRIMITIVE_TYPES: dict[str, Type] = {"integer": INTEGER, "string": STRING, "boolean": BOOLEAN}
 
 # catalogo unico de mensajes de la semantica extendida. CPS-2xx no vive en
 # diagnostics.py ni en core_semantic_visitor.py (ver docstring del modulo).
@@ -80,7 +64,6 @@ _MESSAGES: dict[str, str] = {
     "CPS-206": "no se puede indexar un valor que no es un arreglo",
     "CPS-207": "los elementos del arreglo no tienen un tipo comun",
     "CPS-208": "no se puede acceder a '{detail}' sobre un valor que no es un objeto",
-    "CPS-209": "tipo incompatible en la inicializacion/asignacion de '{detail}'",
     "CPS-210": "numero de argumentos incorrecto en 'new {detail}(...)'",
     "CPS-211": "el argumento {detail} es incompatible con el parametro del constructor",
     "CPS-212": "numero de argumentos incorrecto en la llamada al metodo '{detail}'",
@@ -92,20 +75,6 @@ _MESSAGES: dict[str, str] = {
 # ninguno de estos codigos es advertencia: todos impiden result.ok, a diferencia de
 # CPS-117/118 en la core.
 _WARNING_CODES: set[str] = set()
-
-
-def _is_extended_typed(expr: Expr) -> bool:
-    """
-    True si el tipo de `expr` es responsabilidad EXCLUSIVA de esta etapa (la core lo deja
-    en None): NewExpr, ArrayLiteral, PropertyAccess, IndexAccess, o un Call a metodo
-    (callee PropertyAccess). se usa para decidir cuando vale la pena cerrar el hueco de
-    `_visit_var_decl`/`_visit_assignment` (ver docstring del modulo) sin volver a
-    validar -- y potencialmente duplicar el diagnostico de -- una expresion que la
-    semantica core ya valido correctamente.
-    """
-    if isinstance(expr, (NewExpr, ArrayLiteral, PropertyAccess, IndexAccess)):
-        return True
-    return isinstance(expr, Call) and isinstance(expr.callee, PropertyAccess)
 
 
 class _ClassHierarchyView:
@@ -222,42 +191,17 @@ class ExtendedSemanticVisitor(AstVisitor):
                 self._emit(code, member.line, member.column, member.name)
 
     # ------------------------------------------------------------------
-    # declaraciones: cierra el hueco de la arquitectura de dos pasadas (ver docstring)
+    # declaraciones: la compatibilidad de tipos la valida la core (CPS-100) en la
+    # re-pasada de extended_semantics.analyze; aca solo queda el [] sin contexto
     # ------------------------------------------------------------------
 
-    def _resolve_declared_type(self, type_ref: TypeRef | None) -> Type | None:
-        """
-        misma resolucion que symbol_collector._resolve_type, duplicada aca (no es logica
-        nueva: nombre de primitivo o de clase ya conocida, mas [] anidados) para no
-        depender de un helper privado de un modulo ajeno. devuelve None si no hay
-        anotacion o si el nombre de tipo no se reconoce (ya reportado por el frontend
-        como CPS-030, no hay nada que re-chequear aca).
-        """
-        if type_ref is None:
-            return None
-        base = _PRIMITIVE_TYPES.get(type_ref.base_name)
-        if base is None:
-            if type_ref.base_name not in self._classes:
-                return None
-            base = ClassType(type_ref.base_name)
-        result: Type = base
-        for _ in range(type_ref.array_dimensions):
-            result = ArrayType(result)
-        return result
-
     def _visit_var_decl(self, node: VarDecl) -> None:
-        if node.initializer is not None:
-            self.visit(node.initializer)
-        if node.declared_type is None or node.initializer is None:
-            if node.initializer is not None and isinstance(node.initializer.inferred_type, EmptyArrayType):
-                self._emit("CPS-214", node.line, node.column)
+        if node.initializer is None:
             return
-        if not _is_extended_typed(node.initializer):
-            return  # la semantica core ya lo valido con el tipo correcto
-        declared = self._resolve_declared_type(node.declared_type)
-        if declared is None:
-            return
-        self._check_assignment_compat(declared, node.initializer, "CPS-209", node.line, node.column, node.name)
+        self.visit(node.initializer)
+        # sin anotacion, un [] no tiene de donde sacar el tipo de sus elementos
+        if node.declared_type is None and isinstance(node.initializer.inferred_type, EmptyArrayType):
+            self._emit("CPS-214", node.line, node.column)
 
     # ------------------------------------------------------------------
     # clases: trackeo de la clase actual, 'this' y 'new'
@@ -357,15 +301,9 @@ class ExtendedSemanticVisitor(AstVisitor):
             )
             node.inferred_type = target.inferred_type
             return
-        # target es Identifier: la semantica core ya resolvio target.inferred_type (el
-        # tipo declarado de la variable, cacheado ahi por CoreSemanticVisitor incluso
-        # cuando no llego a validar el valor -- ver docstring del modulo), no se re-visita
-        # el target. si el VALOR es de un tipo que la core no pudo tipar a tiempo, cierra
-        # el mismo hueco que _visit_var_decl para reasignaciones (`x = new Foo();`).
-        if isinstance(target, Identifier) and _is_extended_typed(node.value):
-            self._check_assignment_compat(
-                target.inferred_type, node.value, "CPS-209", node.line, node.column, target.name,
-            )
+        # target Identifier: lo valida la core con CPS-100 en la re-pasada, cuando el
+        # valor ya trae el tipo que le puso esta etapa. validarlo aca otra vez seria
+        # reportar la misma causa dos veces.
 
     def _visit_call(self, node: Call) -> None:
         for arg in node.args:

@@ -256,3 +256,46 @@ def test_request_demasiado_grande_se_rechaza_antes_de_compilar():
 def test_architecture_documentada_y_referenciada():
     with open("ARCHITECTURE.md", encoding="utf-8") as document:
         assert "frontend" in document.read().lower()
+
+
+# ---------- gate 0 del proyecto 02: correcciones previas al ir ----------
+
+def _variable_types(source: str) -> dict[str, object]:
+    result = analyze_full(source)
+    return {
+        name: symbol.type
+        for scope in result.symbols.all_scopes()
+        for name, symbol in scope.symbols.items()
+    }
+
+
+def test_funcion_anidada_en_metodo_se_resuelve_por_scope():
+    source = "class A { function m() { function h(): integer { return 1; } let z = h(); } }"
+    assert codes(source) == set()
+    assert _variable_types(source)["z"] == INTEGER
+
+
+def test_homonimo_de_metodo_anidado_no_produce_cps113_falso():
+    source = 'class A { function m(): string { function m(): integer { return 1; } return "x"; } }'
+    assert codes(source) == set()
+
+
+def test_funcion_anidada_con_nombre_ya_usado_es_redeclaracion():
+    assert "CPS-020" in codes("function f() { let g: integer = 1; function g() {} }")
+
+
+def test_asignacion_incompatible_via_new_se_reporta_una_sola_vez():
+    result = analyze_full("class A {} class B {} let b: B = new A();")
+    assert [d.code for d in result.diagnostics] == ["CPS-100"]
+
+
+def test_ninguna_fixture_reporta_la_misma_causa_dos_veces():
+    # mismo punto + mismo mensaje con codigos distintos = la misma causa contada dos veces
+    from pathlib import Path
+
+    fixtures = sorted(Path(__file__).resolve().parents[1].rglob("*.cps"))
+    assert fixtures
+    for fixture in fixtures:
+        diagnostics = compile_source(fixture.read_text(encoding="utf-8")).diagnostics
+        keys = [(d.line, d.column, d.message) for d in diagnostics]
+        assert len(keys) == len(set(keys)), f"{fixture.name}: {keys}"

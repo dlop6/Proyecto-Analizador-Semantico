@@ -36,6 +36,16 @@ def _base_type_name_to_type(name: str) -> Type | None:
     return {"integer": INTEGER, "string": STRING, "boolean": BOOLEAN}.get(name)
 
 
+def _same_position(symbol: FunctionSymbol | None, node: FunctionDecl) -> FunctionSymbol | None:
+    """
+    el simbolo solo es de este nodo si nacio en la misma posicion. con duplicados
+    (CPS-020/CPS-021) el nombre apunta al primero y no hay que mezclarlos.
+    """
+    if symbol is not None and (symbol.line, symbol.column) == (node.line, node.column):
+        return symbol
+    return None
+
+
 class _ClassHierarchyView:
     """implementa el protocolo ClassHierarchy de types.py sobre las clases ya recolectadas."""
 
@@ -149,14 +159,9 @@ class SymbolCollector:
         if node.is_constructor and node.return_type is not None:
             self._diag.error("CPS-032", node.line, node.column)
 
-        params = [
-            VariableSymbol(name=p.name, line=p.line, column=p.column,
-                            type=self._resolve_type(p.declared_type), is_param=True, initialized=True)
-            for p in node.params
-        ]
         return_type = self._resolve_type(node.return_type) if node.return_type else None
         fn = FunctionSymbol(
-            name=node.name, line=node.line, column=node.column, params=params,
+            name=node.name, line=node.line, column=node.column, params=self._param_symbols(node.params),
             return_type=return_type, is_constructor=node.is_constructor, is_method=True,
             owner_class=cls.name,
         )
@@ -179,15 +184,20 @@ class SymbolCollector:
         cls.fields[node.name] = symbol
 
     def _resolve_function_signature(self, node: FunctionDecl) -> None:
-        fn = self._functions.get(node.name)
+        # una top-level duplicada no le pisa la firma a la primera
+        fn = _same_position(self._functions.get(node.name), node)
         if fn is None:
             return
-        fn.params = [
-            VariableSymbol(name=p.name, line=p.line, column=p.column,
-                            type=self._resolve_type(p.declared_type), is_param=True, initialized=True)
-            for p in node.params
-        ]
+        fn.params = self._param_symbols(node.params)
         fn.return_type = self._resolve_type(node.return_type) if node.return_type else None
+
+    def _param_symbols(self, params: list[Param]) -> list[VariableSymbol]:
+        """un simbolo por parametro, en orden. son los mismos objetos que despues viven en el scope."""
+        return [
+            VariableSymbol(name=p.name, line=p.line, column=p.column,
+                           type=self._resolve_type(p.declared_type), is_param=True, initialized=True)
+            for p in params
+        ]
 
     def _resolve_type(self, type_ref: TypeRef | None) -> Type | None:
         if type_ref is None:
@@ -243,35 +253,43 @@ class SymbolCollector:
             self._diag.error("CPS-020", node.line, node.column, detail=node.name)
 
     def _visit_function_decl(self, node: FunctionDecl) -> None:
-        # Las top-level ya vienen predeclaradas. Una funcion anidada se declara en su
-        # scope lexico antes de visitar su cuerpo: permite autorrecursion y closures
-        # basicos sin introducir hoisting de funciones hermanas.
-        if self.symbols.current.lookup_local(node.name) is None:
-            params = [
-                VariableSymbol(name=p.name, line=p.line, column=p.column,
-                               type=self._resolve_type(p.declared_type), is_param=True, initialized=True)
-                for p in node.params
-            ]
-            fn = FunctionSymbol(
-                name=node.name, line=node.line, column=node.column, params=params,
-                return_type=self._resolve_type(node.return_type) if node.return_type else None,
-            )
-            if self.symbols.declare(fn) is None:
-                self._diag.error("CPS-020", node.line, node.column, detail=node.name)
-        with self.symbols.push(ScopeKind.FUNCTION, f"function:{node.name}", node.line, node.column):
-            self._declare_params(node.params)
+        fn = self._declare_function_symbol(node)
+        with self.symbols.push(ScopeKind.FUNCTION, f"function:{node.name}", node.line, node.column) as fn_scope:
+            if fn is not None:
+                fn.scope = fn_scope
+            self._declare_params(node.params, fn)
             self._visit_function_body(node.body)
 
-    def _declare_params(self, params: list[Param]) -> None:
+    def _declare_function_symbol(self, node: FunctionDecl) -> FunctionSymbol | None:
+        # las top-level ya vienen predeclaradas en la fase 0
+        if self.symbols.current is self.symbols.global_scope:
+            return _same_position(self._functions.get(node.name), node)
+        # una anidada se declara en su scope lexico antes de visitar su cuerpo: permite
+        # autorrecursion y closures basicos sin hoisting de funciones hermanas
+        if self.symbols.current.lookup_local(node.name) is not None:
+            self._diag.error("CPS-020", node.line, node.column, detail=node.name)
+            return None
+        fn = FunctionSymbol(
+            name=node.name, line=node.line, column=node.column, params=self._param_symbols(node.params),
+            return_type=self._resolve_type(node.return_type) if node.return_type else None,
+        )
+        self.symbols.declare(fn)
+        return fn
+
+    def _declare_params(self, params: list[Param], fn: FunctionSymbol | None) -> None:
+        """
+        declara en el scope actual los MISMOS objetos de fn.params, asi la firma y el
+        frame no quedan con dos copias del mismo parametro. sin simbolo (duplicados) se
+        crean nuevos como antes.
+        """
+        existing = fn.params if fn is not None else self._param_symbols(params)
         seen: set[str] = set()
-        for p in params:
+        for p, symbol in zip(params, existing):
             if p.name in seen:
                 self._diag.error("CPS-022", p.line, p.column, detail=p.name)
                 continue
             seen.add(p.name)
-            declared_type = self._resolve_type(p.declared_type) if p.declared_type else None
-            self.symbols.declare(VariableSymbol(name=p.name, line=p.line, column=p.column,
-                                                 type=declared_type, is_param=True, initialized=True))
+            self.symbols.declare(symbol)
 
     def _visit_function_body(self, body: Block) -> None:
         """
@@ -283,7 +301,13 @@ class SymbolCollector:
             self._visit_stmt(stmt)
 
     def _visit_class_decl(self, node: ClassDecl) -> None:
-        cls = self._classes.get(node.name)
+        # solo las top-level tienen ClassSymbol (fase 0): una clase local no tendria
+        # layout, ni this, ni forma de instanciarse. mejor un error claro que ignorarla
+        top_level = self.symbols.current is self.symbols.global_scope
+        if not top_level:
+            self._diag.error("CPS-024", node.line, node.column, detail=node.name)
+        # una local homonima de una top-level no le puede pisar el scope a la de verdad
+        cls = self._classes.get(node.name) if top_level else None
         with self.symbols.push(ScopeKind.CLASS, f"class:{node.name}", node.line, node.column) as class_scope:
             if cls is not None:
                 cls.scope = class_scope
@@ -293,14 +317,17 @@ class SymbolCollector:
                 # los atributos ya quedaron resueltos en fase 1, no hay cuerpo que recorrer
 
     def _visit_method(self, cls: ClassSymbol | None, node: FunctionDecl) -> None:
-        with self.symbols.push(ScopeKind.FUNCTION, f"function:{node.name}", node.line, node.column):
+        fn = _same_position(cls.methods.get(node.name), node) if cls is not None else None
+        with self.symbols.push(ScopeKind.FUNCTION, f"function:{node.name}", node.line, node.column) as method_scope:
+            if fn is not None:
+                fn.scope = method_scope
             if cls is not None:
                 # 'this' se resuelve como cualquier variable -- cero codigo especial en la semantica core
                 self.symbols.declare(VariableSymbol(
                     name=THIS_NAME, line=node.line, column=node.column,
                     type=ClassType(cls.name), is_const=True, is_implicit=True, initialized=True,
                 ))
-            self._declare_params(node.params)
+            self._declare_params(node.params, fn)
             self._visit_function_body(node.body)
 
     def _visit_block(self, node: Block) -> None:

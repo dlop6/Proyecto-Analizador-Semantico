@@ -108,6 +108,7 @@ Esta API **no cambia de forma** — está protegida por un test de introspecció
 | CPS-021 | error | miembro de clase duplicado |
 | CPS-022 | error | parámetro duplicado |
 | CPS-023 | error | nombre de clase no declarado (en `new` o herencia) |
+| CPS-024 | error | clase declarada dentro de una función o bloque (solo se admiten clases en el nivel superior) |
 | CPS-030 | error | tipo desconocido en una anotación |
 | CPS-031 | error | herencia circular |
 | CPS-032 | error | el constructor no debe declarar tipo de retorno |
@@ -384,13 +385,15 @@ result = analyze_extended(analyze_core(analyze_source(source))) -> ExtendedSeman
 | CPS-206 | error | se intenta indexar algo que no es un arreglo |
 | CPS-207 | error | los elementos de un literal de arreglo no tienen tipo común |
 | CPS-208 | error | acceso a miembro/llamada a método sobre algo que no es un objeto |
-| CPS-209 | error | tipo incompatible en una declaración/asignación cuyo valor tipa esta etapa (ver más abajo) |
 | CPS-210 | error | aridad incorrecta en `new Clase(...)` |
 | CPS-211 | error | argumento incompatible en `new Clase(...)` |
 | CPS-212 | error | aridad incorrecta en llamada a método |
 | CPS-213 | error | argumento incompatible en llamada a método |
 | CPS-214 | error | literal de arreglo vacío sin tipo de contexto |
 | CPS-215 | error | método referenciado sin invocarlo |
+
+`CPS-209` está retirado: duplicaba al `CPS-100` de la core, que ya detecta la misma
+incompatibilidad en la re-pasada de `extended_semantics.analyze`.
 
 ### Decisiones de diseño relevantes (semántica extendida)
 

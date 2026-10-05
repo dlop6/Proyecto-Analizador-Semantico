@@ -38,6 +38,7 @@ _MESSAGES: dict[str, str] = {
     "CPS-021": "la clase ya tiene un miembro llamado '{detail}'",
     "CPS-022": "parametro duplicado: '{detail}'",
     "CPS-023": "clase no declarada: '{detail}'",
+    "CPS-024": "la clase '{detail}' tiene que declararse en el nivel superior del programa",
     "CPS-030": "tipo desconocido: '{detail}'",
     "CPS-031": "herencia circular detectada en la clase '{detail}'",
     "CPS-032": "el constructor no debe declarar tipo de retorno",
