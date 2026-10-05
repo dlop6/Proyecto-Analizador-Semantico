@@ -511,6 +511,101 @@ ide/
   static/app.js           # fetch a /api/compile, sin logica semantica
 ```
 
+## Generación de TAC core (Proyecto 02, Persona 2)
+
+Baja a código de tres direcciones el subconjunto core de Compiscript: variables y
+constantes, aritmética, comparaciones, unarios, lógica con cortocircuito, ternario,
+`print`, `if`/`else`, `while`, `do-while`, `for`, `switch`, `break`/`continue`,
+funciones, parámetros, `return`, recursión y funciones anidadas. El formato del TAC, los
+opcodes y las convenciones de lowering están en `docs/INTERMEDIATE_CODE.md` (Persona 1);
+el generador los sigue al pie de la letra (los ejemplos core del documento salen
+idénticos del generador, y hay un test que lo verifica).
+
+### Contrato congelado: `CoreTacGenerator.generate`
+
+```python
+from compiler.runtime.runtime_layout import prepare
+from compiler.tac.core_generator import CoreTacGenerator
+from compiler.ir.serializer import serialize
+
+layout = prepare(semantic_result)                              # Persona 1
+program = CoreTacGenerator.generate(semantic_result, layout)   # -> IRProgram
+text = serialize(program)
+```
+
+- Si `semantic_result` tiene **cualquier** error léxico, sintáctico o semántico, `generate`
+  lo rechaza con `ValueError` antes de emitir nada. Los warnings no bloquean.
+- No valida tipos ni nombres de nuevo, ni crea otra tabla de símbolos, otro manager de
+  temporales u otro formato de texto. Todo pasa por `IRBuilder`, `RuntimeLayout` y
+  `ScopedVisitor`.
+- Arreglos, objetos, `this`, `new`, `foreach` y `try`/`catch` lanzan
+  `UnsupportedConstructError`: los baja `ExtendedTacGenerator` (Persona 3), que hereda
+  de `CoreTacGenerator`. Para eso hay ganchos: `lower_member_assignment`
+  (`obj.x = v`, `a[i] = v`), `lower_method_call` (`obj.m(...)`), `emit_arguments`,
+  `jump_targets` (para que `foreach` reutilice `break`/`continue`) y `visit_FunctionDecl`,
+  que ya sirve para métodos y constructores.
+
+### Estructura
+
+```
+compiler/tac/
+  core_generator.py         # CoreTacGenerator: compone los lowerings; declaraciones, print, sentencias-expresión
+  expression_lowering.py    # literales, variables, asignación, BIN/UN, ternario, && / || con saltos
+  control_flow_lowering.py  # if, while, do-while, for, switch, break/continue (pilas de destinos)
+  function_lowering.py      # FUNC_BEGIN/FUNC_END, RETURN, ARG + CALL, link= para static link
+```
+
+Cada módulo es un mixin con los `visit_<Nodo>` de su familia de construcciones (SRP). El
+generador hereda de `ScopedVisitor`, así que cada nombre se resuelve al mismo símbolo que
+declaró el collector y los scopes se recorren en el mismo orden.
+
+### Temporales
+
+- Literales e identificadores **no** crean temporales: salen como constante o `StorageRef`.
+- Cada operación pide su resultado al `TempManager` y libera los operandos temporales
+  justo después de la instrucción que los consume. Por eso las sentencias consecutivas
+  reutilizan `t0`, `t1`, …
+- El builder de Persona 1 explota si se lee un temporal ya liberado o si una unidad
+  cierra con temporales vivos. Todos los fixtures generan sin ese error, y el pico queda
+  en `FUNC_END temps=k`.
+
+### Decisiones de diseño (TAC core)
+
+Ninguna de estas es una regla del lenguaje; si el catedrático indica otra cosa, se cambia.
+
+- **Declaración sin inicializador** (`let x: integer;`): no emite código. El slot ya
+  existe en el frame o en el área global.
+- **Función `void` usada como valor** (`let y = f();`, que la semántica acepta): se emite
+  el `CALL` sin destino y el valor resultante es `null`.
+- **Orden izquierda → derecha.** Un operando izquierdo que es variable se lee directo en el
+  `BIN`, salvo que el operando derecho pueda escribirla antes: una asignación a esa misma
+  variable, una llamada si la variable es global o de otro frame, o una llamada a una
+  función anidada con static link. En esos casos primero se copia a un temporal
+  (`g + f()` → `MOV t0, g`).
+- **Sombra y orden de declaración.** Una variable local es visible a partir de su `let`
+  (después del inicializador), igual que en el collector. En
+  `{ print(x); let x = 2; }` el `print` usa la `x` de afuera.
+- **`switch`.** El sujeto siempre queda en un temporal, aunque sea una variable, y se
+  evalúa una sola vez. No hay fallthrough y cada rama termina en `GOTO L_switch_end`.
+- **`&&` / `||`.** Si el operando izquierdo ya es un temporal (por ejemplo una
+  comparación), se reutiliza como resultado sin un `MOV` redundante.
+- **`return` implícito.** Si el cuerpo de una función no termina en `return`, se agrega
+  `RETURN` sin valor. No hay eliminación de código muerto, así que puede quedar un
+  `GOTO`/`RETURN` inalcanzable (por ejemplo, después de un `break`).
+
+### Tests
+
+```bash
+pytest tests/person2_tac -v
+```
+
+- `tests/fixtures/core_tac/valid/*.cps` traen al lado su `.tac` esperado, revisado a mano.
+- `tests/fixtures/core_tac/invalid/*.cps` cubren errores léxicos, sintácticos, semánticos
+  y varios semánticos en la misma corrida; ninguno genera IR.
+- Los tests por constructo están en `test_expressions.py`, `test_control_flow.py`,
+  `test_functions.py` y `test_temp_recycling.py`. El contrato y los ejemplos del documento
+  están en `test_api.py`, y las reglas de capas en `test_architecture.py`.
+
 ## Cómo ejecutar todo
 
 ```bash
