@@ -210,15 +210,17 @@ funciones; `layout` en clases.
   - Un override reutiliza el slot del padre con su propia implementación.
   - Los métodos nuevos se agregan al final.
 - **Constructores:**
-  - No se heredan (regla 12 del Proyecto 01), así que no tienen `method_slot`.
-  - `ClassLayout.constructor_label` es `None` si la clase no declara constructor propio.
+  - No entran a la tabla de despacho (no tienen `method_slot`): se llaman directo con `CALL`.
+  - `ClassLayout.constructor_label` es el constructor propio o, si la clase no declara uno, el del
+    ancestro más cercano que lo tenga (`new Dog("Rex")` llama a `fn::Animal.constructor`). Es `None`
+    solo si ninguna clase de la cadena declara constructor.
 - **Instanciación** `new C(args)`, en este orden:
   1. `t = NEW_OBJ C, fields=layout.size`;
   2. si hay inicializadores de atributos, `SET_FIELD t, ...` en el orden del layout (heredados primero).
      El inicializador se evalúa en el sitio del `new` (decisión de diseño), pero sus nombres se
      resuelven en el scope de la clase que lo declara, igual que en la semántica;
-  3. si C tiene constructor: `ARG t` (que pasa a ser `this`), los `ARG` de los argumentos y
-     `CALL fn::C.constructor, argc=n+1`.
+  3. si `constructor_label` no es `None`: `ARG t` (que pasa a ser `this`), los `ARG` de los argumentos y
+     `CALL <constructor_label>, argc=n+1`.
 - **Llamada a método** `obj.m(args)`, en este orden:
   1. se evalúa el receptor;
   2. se emite un `ARG` por argumento;

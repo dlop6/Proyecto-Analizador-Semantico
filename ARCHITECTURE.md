@@ -72,8 +72,11 @@ anidada. `this` solo existe en scopes de metodos y constructores.
 - `foreach` exige `ArrayType(T)` y asigna `T` a su variable de iteración. Un iterable
   no-arreglo o `[]` sin tipo de elemento reporta `CPS-120`; la revalidación detecta
   también propiedades, índices, llamadas y construcciones tipadas después de core.
-- Una subclase sin constructor propio acepta solo cero argumentos, segun la regla 12
-  del PDF del proyecto. Metodos y atributos si usan lookup heredado.
+- Una clase sin constructor propio usa el del ancestro mas cercano que lo declare
+  (como `new Dog("Rex")` en el ejemplo oficial); si ninguno lo declara, solo acepta cero
+  argumentos. Metodos y atributos tambien usan lookup heredado.
+- `+` concatena un `string` con otro `string`, un `integer` o un `boolean`, como en el
+  ejemplo oficial; el resto de operadores aritmeticos es solo numerico.
 
 Las reglas puras de expresiones, funciones, control de flujo, clases y arreglos devuelven
 tipos y codigos; los visitors son los unicos que escriben diagnosticos con posicion.
@@ -164,6 +167,7 @@ reciclaje de temporales.
 ## Pendientes docentes
 
 No se cambia `float`, `switch` ni `break` hasta confirmar contradicciones entre los
-requisitos semánticos, la gramática y los ejemplos oficiales. Tampoco se relajan
-`string + integer` ni la herencia de constructores, por lo que `program/program.cps` no
-genera TAC. El comportamiento actual se conserva y está documentado en el README.
+requisitos semánticos, la gramática y los ejemplos oficiales. El comportamiento actual
+se conserva y está documentado en el README. La concatenación `string + integer` y los
+constructores heredados siguen al ejemplo oficial `program/program.cps`, que compila y
+genera TAC.

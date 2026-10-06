@@ -70,12 +70,12 @@ def test_programa_con_errores_semanticos_de_clases_y_arreglos_no_success():
     assert "CPS-207" in codes
 
 
-def test_programa_oficial_de_ejemplo_compila(tmp_path=None):
-    program_file = PROGRAM_DIR / "program.cps"
-    if not program_file.exists():
-        return  # el archivo de ejemplo es opcional, no todos los entornos lo traen
-    source = program_file.read_text(encoding="utf-8")
+def test_programa_oficial_de_ejemplo_compila_sin_errores_y_genera_tac():
+    # el ejemplo oficial usa concatenacion string + integer y un constructor heredado
+    # (new Dog("Rex") con el constructor de Animal): ambos son validos
+    source = (PROGRAM_DIR / "program.cps").read_text(encoding="utf-8")
     result = compile_source(source)
-    # no se exige que sea valido semanticamente (es un ejemplo, no una fixture curada),
-    # pero el pipeline completo no debe reventar sobre el.
-    assert isinstance(result.diagnostics, list)
+    assert result.success is True
+    assert result.diagnostics == []
+    assert "CALL fn::Animal.constructor, argc=2" in result.tac_text
+    assert 'BIN +, "5 + 1 = ", addFive@global[5]' in result.tac_text

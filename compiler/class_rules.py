@@ -85,17 +85,18 @@ def check_new_call(
     class_name: str, cls: ClassSymbol | None, arg_types: list[Type], hierarchy=None,
 ) -> CheckResult:
     """
-    valida `new Clase(args)` contra el constructor propio de `cls`. La regla 12 del PDF
-    del proyecto indica que, si una clase no tiene constructor, solo admite cero
-    argumentos; por eso no se hereda el constructor del padre. El tipo resultante SIEMPRE es
-    ClassType(class_name) -- a diferencia de una llamada a funcion, el uso incorrecto de
+    valida `new Clase(args)` contra el constructor efectivo de `cls`: el propio o, si no
+    declara uno, el del ancestro mas cercano que lo tenga (asi lo usa el ejemplo oficial
+    program.cps: `class Dog : Animal` sin constructor y `new Dog("Rex")`). si ninguna clase
+    de la cadena declara constructor, solo admite cero argumentos. El tipo resultante SIEMPRE
+    es ClassType(class_name) -- a diferencia de una llamada a funcion, el uso incorrecto de
     los argumentos no cambia que 'new Clase(...)' produzca un valor de tipo Clase.
     """
     result_type = ClassType(class_name)
     if cls is None:
         return ERROR, None, None  # clase no declarada, ya reportado por el frontend (CPS-023)
 
-    constructor = cls.constructor
+    constructor = effective_constructor(cls)
     if not isinstance(constructor, FunctionSymbol):
         if len(arg_types) != 0:
             return result_type, "CPS-210", class_name
@@ -104,6 +105,16 @@ def check_new_call(
     _, core_code, detail = check_call(class_name, constructor, arg_types, hierarchy)
     code = _CONSTRUCTOR_CODES.get(core_code, core_code)
     return result_type, code, detail
+
+
+def effective_constructor(cls: ClassSymbol) -> FunctionSymbol | None:
+    """el constructor propio de `cls` o, si no declara uno, el del ancestro mas cercano."""
+    current: ClassSymbol | None = cls
+    while current is not None:
+        if isinstance(current.constructor, FunctionSymbol):
+            return current.constructor
+        current = current.parent
+    return None
 
 
 def check_override(sub: FunctionSymbol, parent: FunctionSymbol) -> "str | None":

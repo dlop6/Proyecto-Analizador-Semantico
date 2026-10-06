@@ -59,7 +59,7 @@ def test_campo_que_oculta_uno_heredado_recibe_slot_nuevo():
     assert layout.class_layouts["B"].field_named("x").owner_class == "B"
 
 
-def test_constructor_no_entra_a_la_tabla_de_despacho_ni_se_hereda():
+def test_constructor_no_entra_a_la_tabla_de_despacho_y_se_hereda_si_falta():
     result, layout = layout_for(
         "class A { function constructor(n: integer) {} function m() {} } class B : A { function k() {} }"
     )
@@ -67,7 +67,23 @@ def test_constructor_no_entra_a_la_tabla_de_despacho_ni_se_hereda():
     assert layout.class_layouts["A"].constructor_label == "fn::A.constructor"
     assert a.constructor.method_slot is None
     assert [m.name for m in layout.class_layouts["A"].methods] == ["m"]
+    # B no declara constructor: usa el de A (ancestro mas cercano)
+    assert layout.class_layouts["B"].constructor_label == "fn::A.constructor"
+    assert [m.name for m in layout.class_layouts["B"].methods] == ["m", "k"]
+
+
+def test_sin_constructor_en_toda_la_cadena_no_hay_etiqueta():
+    _, layout = layout_for("class A { function m() {} } class B : A {}")
+    assert layout.class_layouts["A"].constructor_label is None
     assert layout.class_layouts["B"].constructor_label is None
+
+
+def test_constructor_propio_tiene_prioridad_sobre_el_heredado():
+    _, layout = layout_for(
+        "class A { function constructor() {} } class B : A {} class C : B { function constructor() {} }"
+    )
+    assert layout.class_layouts["B"].constructor_label == "fn::A.constructor"
+    assert layout.class_layouts["C"].constructor_label == "fn::C.constructor"
 
 
 def test_campos_quedan_como_field_con_su_clase():

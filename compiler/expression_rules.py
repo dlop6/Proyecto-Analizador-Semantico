@@ -24,6 +24,8 @@ _ARITHMETIC_OPS = {"-", "*", "/", "%"}
 _RELATIONAL_OPS = {"<", "<=", ">", ">="}
 _EQUALITY_OPS = {"==", "!="}
 _LOGICAL_OPS = {"&&", "||"}
+# tipos que se pueden concatenar con un string usando + (null, clases y arreglos no)
+_CONCATENABLE = (STRING, INTEGER, BOOLEAN)
 
 # resultado de una regla: (tipo resultante, codigo de diagnostico o None si no hay error, detail)
 CheckResult = tuple[Type, "str | None", "str | None"]
@@ -33,14 +35,16 @@ def check_binary_op(op: str, left: Type, right: Type, hierarchy: ClassHierarchy 
     """
     tipo resultante de aplicar `op` entre `left` y `right` segun las decisiones del proyecto:
     +/-/*/%%  son numericos (integer unicamente, no hay float en esta gramatica), + ademas
-    permite string+string; comparaciones relacionales exigen numericos; == / != exigen
-    tipos compatibles en cualquier direccion (cubre null y subclases); && / || exigen boolean.
+    concatena: si uno de los lados es string y el otro es string, integer o boolean, el
+    resultado es string (asi lo usa el ejemplo oficial program.cps: "Number: " + n);
+    comparaciones relacionales exigen numericos; == / != exigen tipos compatibles en
+    cualquier direccion (cubre null y subclases); && / || exigen boolean.
     """
     if isinstance(left, ErrorType) or isinstance(right, ErrorType):
         return ERROR, None, None
 
     if op == "+":
-        if left == STRING and right == STRING:
+        if (left == STRING and right in _CONCATENABLE) or (right == STRING and left in _CONCATENABLE):
             return STRING, None, None
         numeric = numeric_result(left, right)
         if numeric is not None:

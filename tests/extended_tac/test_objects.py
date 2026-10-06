@@ -104,3 +104,8 @@ def test_receptor_resultado_de_new():
 def test_metodo_void_usado_como_valor_da_null():
     source = CLASS + "let p: Punto = new Punto(1); print(p.reset());"
     assert entry_lines(source)[-2:] == ["CALL_METHOD p@global[0], reset[1], argc=0", "PRINT null"]
+
+
+def test_concatenacion_de_string_con_entero_es_un_bin_suma():
+    lines = entry_lines('let n: integer = 3; print("n = " + n);')
+    assert lines[-2:] == ['t0 = BIN +, "n = ", n@global[0]', "PRINT t0"]

@@ -68,3 +68,28 @@ def test_constructor_propio_de_la_subclase():
         "CALL fn::B.constructor, argc=2",
         "MOV b@global[0], t0",
     ]
+
+
+def test_subclase_sin_constructor_llama_al_constructor_heredado():
+    source = """
+    class Animal { let nombre: string; function constructor(n: string) { this.nombre = n; } }
+    class Perro : Animal { function hablar(): string { return "guau"; } }
+    let p: Perro = new Perro("Rex");
+    """
+    assert entry_lines(source) == [
+        "t0 = NEW_OBJ Perro, fields=1",
+        "ARG t0",
+        'ARG "Rex"',
+        "CALL fn::Animal.constructor, argc=2",
+        "MOV p@global[0], t0",
+    ]
+
+
+def test_el_constructor_heredado_es_el_del_ancestro_mas_cercano():
+    source = """
+    class A { function constructor() {} }
+    class B : A { function constructor(x: integer) {} }
+    class C : B {}
+    let c: C = new C(1);
+    """
+    assert "CALL fn::B.constructor, argc=2" in entry_lines(source)

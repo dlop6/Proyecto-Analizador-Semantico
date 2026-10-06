@@ -238,7 +238,7 @@ semántica core mantiene su **propio** catálogo en `compiler/core_semantic_visi
 | CPS-101 | error | variable/atributo sin tipo declarado y sin inicializador |
 | CPS-102 | error | reasignación de una constante |
 | CPS-103 | error | identificador no declarado |
-| CPS-104 | error | operandos incompatibles para `+`, `-`, `*`, `/` o `%` |
+| CPS-104 | error | operandos incompatibles para `+`, `-`, `*`, `/` o `%` (`+` también concatena `string` con `string`/`integer`/`boolean`) |
 | CPS-105 | error | operador relacional (`<`, `<=`, `>`, `>=`) con operandos no numéricos |
 | CPS-106 | error | operandos no comparables con `==` / `!=` |
 | CPS-107 | error | operador lógico (`&&`, `\|\|`) con operando no booleano |
@@ -287,6 +287,10 @@ semántica core mantiene su **propio** catálogo en `compiler/core_semantic_visi
   `STRING`, `BOOLEAN`) son singletons en `types.py`, pero las reglas de esta etapa los
   comparan con `==` (igualdad estructural de dataclass) y no con `is`, para que sigan
   funcionando igual si algún día dejan de ser singletons únicos.
+- **Concatenación con `+`.** Si uno de los operandos es `string` y el otro es `string`,
+  `integer` o `boolean`, el resultado es `string` (`"Number: " + n`), como en el ejemplo
+  oficial `program/program.cps`. `null`, objetos y arreglos no se concatenan (`CPS-104`), y
+  `-`, `*`, `/`, `%` siguen siendo solo numéricos.
 
 ### Estructura de la semántica core
 
@@ -348,8 +352,10 @@ result = analyze_extended(analyze_core(analyze_source(source))) -> ExtendedSeman
 - **Llamadas a método** (`obj.metodo(args)`) y **`new Clase(args)`**: validan aridad y
   tipos de argumento reusando `function_rules.check_call` (no se reimplementa ese loop),
   remapeando sus códigos al rango propio `CPS-2xx`. `new Clase(...)` valida contra el
-  constructor propio de la clase. Si una subclase no declara constructor, solo acepta
-  cero argumentos, segun la regla 12 del PDF del proyecto.
+  constructor efectivo de la clase: el propio o, si no declara uno, el del ancestro más
+  cercano que lo tenga (así lo usa el ejemplo oficial: `class Dog : Animal` sin
+  constructor y `new Dog("Rex")`). Si ninguna clase de la cadena declara constructor,
+  solo acepta cero argumentos.
   El tipo resultante de `NewExpr` siempre es `ClassType(Clase)`, tenga o no errores de
   argumentos.
 - **`this`**: la validación estructural (solo dentro de método/constructor) ya la hace el
@@ -675,7 +681,7 @@ compiler/tac/
 | `m[i][j]` | dos `ARR_GET` encadenados (un arreglo de arreglos) |
 | `foreach (x in a)` | `a`, índice y `LEN` en temporales vivos todo el cuerpo; `L_foreach_cond/step/end`; `ARR_GET` + `MOV` a `x` |
 | `class C {...}` | sin código propio; cada método y el constructor son `fn::C.metodo` con `this` en `frame[0]` |
-| `new C(args)` | `t = NEW_OBJ C, fields=n`, `SET_FIELD` de los inicializadores, `ARG t`, `ARG args`, `CALL fn::C.constructor, argc=n+1` |
+| `new C(args)` | `t = NEW_OBJ C, fields=n`, `SET_FIELD` de los inicializadores, `ARG t`, `ARG args`, `CALL fn::C.constructor, argc=n+1` (o el constructor heredado del ancestro más cercano, si `C` no declara uno) |
 | `obj.f` / `obj.f = v` | `t = GET_FIELD obj, f@field[k]` / `SET_FIELD obj, f@field[k], v` |
 | `obj.m(args)` | `ARG args`, `CALL_METHOD [t,] obj, m[slot], argc=n` |
 | herencia | campos heredados primero; un override reutiliza el slot del padre |
@@ -764,13 +770,8 @@ un entero; y los requisitos limitan `break` a bucles aunque Compiscript permite
 oficiales: no hay `float`, `switch` acepta `integer`/`string`/`boolean` y `break` es
 válido en un `switch`.
 
-**`program/program.cps` (el ejemplo oficial) no genera TAC**, porque no pasa el análisis
-semántico del Proyecto 01:
-
-- 7 errores `CPS-104` por concatenaciones `string + integer`: la regla vigente solo admite
-  `string + string`;
-- 1 error `CPS-210` en `new Dog("Rex")`: los constructores no se heredan (regla 12).
-
-No se cambia la semántica hasta tener la confirmación docente. Mientras tanto,
-`tests/grading/fixtures/valid_tac_complete.cps` cubre las mismas construcciones
-respetando esas dos reglas.
+**`program/program.cps` (el ejemplo oficial)** usa concatenaciones `string + integer` y un
+constructor heredado (`new Dog("Rex")` con el constructor de `Animal`). Como el catedrático
+no indicó otra cosa, se sigue el ejemplo oficial: ambas construcciones son válidas, el
+programa compila sin diagnósticos y genera TAC. Está incluido como fixture dorada en
+`tests/fixtures/extended_tac/valid/program_oficial.cps`.

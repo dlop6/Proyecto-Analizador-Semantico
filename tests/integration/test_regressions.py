@@ -125,8 +125,13 @@ def test_foreach_con_atributo_arreglo_asigna_el_tipo_del_elemento():
 
 
 def test_operacion_con_indice_extendido_no_se_acepta():
-    source = 'let a: integer[] = [1]; let x: string = a[0] + "y";'
+    # el tipo de a[0] lo resuelve la etapa extendida; la re-pasada core igual valida el '-'
+    source = 'let a: integer[] = [1]; let x: integer = a[0] - "y";'
     assert "CPS-104" in codes(source)
+
+
+def test_concatenacion_con_indice_extendido_se_acepta():
+    assert analyze_full('let a: integer[] = [1]; let x: string = a[0] + "y";').ok
 
 
 def test_inferencia_encadenada_de_arreglos_actualiza_simbolos():
@@ -207,10 +212,18 @@ def test_arreglo_vacio_con_contexto_es_valido():
     assert analyze_full("let xs: integer[] = [];").ok
 
 
-def test_subclase_sin_constructor_solo_acepta_cero_argumentos():
-    source = "class A { function constructor(x: integer) {} } class B : A {} let b: B = new B(1);"
-    assert "CPS-210" in codes(source)
-    assert analyze_full("class A { function constructor(x: integer) {} } class B : A {} let b: B = new B();").ok
+def test_subclase_sin_constructor_usa_el_constructor_heredado():
+    # asi lo usa el ejemplo oficial program.cps: class Dog : Animal {...}; new Dog("Rex")
+    base = "class A { function constructor(x: integer) {} } class B : A {} "
+    assert analyze_full(base + "let b: B = new B(1);").ok
+    assert "CPS-210" in codes(base + "let b: B = new B();")
+    assert "CPS-211" in codes(base + 'let b: B = new B("x");')
+
+
+def test_clase_sin_constructor_en_toda_la_cadena_solo_acepta_cero_argumentos():
+    base = "class A {} class B : A {} "
+    assert analyze_full(base + "let b: B = new B();").ok
+    assert "CPS-210" in codes(base + "let b: B = new B(1);")
 
 
 def test_svg_escape_texto_del_usuario():
