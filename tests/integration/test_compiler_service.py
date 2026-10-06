@@ -1,7 +1,7 @@
 """
 tests de integracion: compiler_service.compile_source, el UNICO compositor del pipeline
-completo (frontend -> core -> extended -> visualizacion). corre sobre codigo fuente real,
-sin mockear ninguna etapa -- es la prueba de que las 3 etapas encajan.
+completo (frontend -> core -> extended -> runtime layout -> tac -> visualizacion). corre
+sobre codigo fuente real, sin mockear ninguna etapa -- es la prueba de que todo encaja.
 """
 from pathlib import Path
 
@@ -17,8 +17,9 @@ PROGRAM_DIR = Path(__file__).resolve().parents[2] / "program"
 def test_compilation_result_tiene_exactamente_los_campos_esperados():
     # symbols se agrego para que el ide pueda mostrar la tabla de simbolos completa
     # (insercion/recuperacion/actualizacion/manejo de ambitos), no solo explicarla.
+    # tac_text es el codigo intermedio serializado (None si hubo cualquier error).
     field_names = {f.name for f in dataclasses.fields(CompilationResult)}
-    assert field_names == {"success", "diagnostics", "ast_svg", "symbols"}
+    assert field_names == {"success", "diagnostics", "ast_svg", "tac_text", "symbols"}
 
 
 # ---------- programa valido de punta a punta ----------

@@ -314,6 +314,40 @@ section h2 {
 #ast-container svg { display: block; max-width: none; }
 .hint { color: var(--muted); font-size: 0.85rem; }
 
+#tac-container {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.25rem;
+}
+
+#tac-state { margin: 0 0 0.4rem; }
+#tac-state.ok { color: var(--success); }
+
+#tac-output {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--editor-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre;
+  tab-size: 2;
+}
+
+#tac-output .tac-func { color: var(--keyword); font-weight: 700; }
+#tac-output .tac-label { color: var(--class); }
+#tac-output .tac-instr { color: var(--text); }
+
+.symbol-runtime {
+  margin-left: 0.4rem;
+  color: var(--number);
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 0.72rem;
+}
+
 #symbols-container {
   flex: 1;
   min-height: 0;

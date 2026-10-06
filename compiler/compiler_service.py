@@ -1,10 +1,18 @@
 """
-fachada de integracion: encadena las tres etapas (frontend -> semantica core ->
-semantica extendida) mas la visualizacion del ast. es el UNICO compositor del pipeline
-completo (dip) -- ni ide/app.py ni ningun otro modulo debe instanciar frontend,
-core_semantics o extended_semantics por separado.
+fachada de integracion: encadena todo el pipeline
 
-compiler_service.compile_source(source) -> CompilationResult(success, diagnostics, ast_svg)
+  frontend -> semantica core -> semantica extendida -> runtime layout
+           -> ExtendedTacGenerator -> serializer
+
+mas la visualizacion del ast. es el UNICO compositor del pipeline completo (dip): ni
+ide/app.py ni ningun otro modulo instancia las etapas por separado.
+
+compiler_service.compile_source(source)
+    -> CompilationResult(success, diagnostics, ast_svg, tac_text, symbols)
+
+invariante: con cualquier error lexico, sintactico o semantico no se genera ir
+(tac_text=None) y ni siquiera se llama a runtime_layout.prepare. las advertencias no
+bloquean la generacion.
 """
 from __future__ import annotations
 
@@ -15,7 +23,10 @@ import graphviz
 from compiler import core_semantics, extended_semantics, frontend
 from compiler.ast_visualizer import render_svg
 from compiler.diagnostics import Diagnostic
+from compiler.ir.serializer import serialize
+from compiler.runtime.runtime_layout import prepare
 from compiler.scopes import SymbolTable
+from compiler.tac.extended_generator import ExtendedTacGenerator
 
 # excepciones puntuales que graphviz.Digraph.pipe() puede lanzar cuando el binario 'dot'
 # no esta instalado o falla -- no se captura Exception a secas para no esconder bugs
@@ -27,12 +38,13 @@ _GRAPHVIZ_ERRORS = (graphviz.ExecutableNotFound, graphviz.CalledProcessError)
 class CompilationResult:
     """
     contrato que consume el ide: exito, diagnosticos de todo el pipeline, svg del ast,
-    y la tabla de simbolos completa (arbol de scopes) para que la ui pueda mostrar
-    insercion/recuperacion/actualizacion/manejo de ambitos, no solo explicarlo de palabra.
+    el tac serializado (None si hubo cualquier error) y la tabla de simbolos completa
+    (arbol de scopes, con la informacion de runtime que agrega prepare cuando hubo ir).
     """
     success: bool
     diagnostics: list[Diagnostic]
     ast_svg: str | None
+    tac_text: str | None
     symbols: SymbolTable
 
 
@@ -54,9 +66,16 @@ def compile_source(source: str) -> CompilationResult:
         except _GRAPHVIZ_ERRORS:
             ast_svg = None
 
+    success = extended_result.ast is not None and not extended_result.has_errors
+    tac_text = None
+    if success:
+        program = ExtendedTacGenerator.generate(extended_result, prepare(extended_result))
+        tac_text = serialize(program)
+
     return CompilationResult(
-        success=extended_result.ast is not None and not extended_result.has_errors,
+        success=success,
         diagnostics=extended_result.diagnostics,
         ast_svg=ast_svg,
+        tac_text=tac_text,
         symbols=extended_result.symbols,
     )
