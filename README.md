@@ -1,13 +1,17 @@
 # Compiscript — Analizador Semántico
 
-Proyecto de Construcción de Compiladores: analizador semántico para Compiscript
-(subconjunto de TypeScript), en Python 3 + ANTLR4. El trabajo está dividido en
-etapas con dependencia secuencial (ver `docs/temp/` para la división completa).
+Proyecto de Construcción de Compiladores: compilador de Compiscript (subconjunto de
+TypeScript) en Python 3 + ANTLR4, hasta la generación de **código intermedio (TAC)**.
 
-Este README documenta las 4 etapas completas: el frontend (parser, AST, tipos, tabla de
+Este README documenta el pipeline completo: el frontend (parser, AST, tipos, tabla de
 símbolos), la semántica core (expresiones, funciones, control de flujo), la semántica
-extendida (clases, arreglos) y la integración final (visualización del AST + IDE). Para
-una vista de conjunto de cómo encajan entre sí, ver `ARCHITECTURE.md`.
+extendida (clases, arreglos), el modelo de runtime y la generación de TAC (core y
+extendido), la visualización del AST y el IDE. Para una vista de conjunto de cómo encajan
+entre sí, ver `ARCHITECTURE.md`; la especificación del lenguaje intermedio está en
+`docs/INTERMEDIATE_CODE.md`.
+
+**Fuera de alcance, a propósito:** el compilador no interpreta ni ejecuta Compiscript ni
+el TAC, no genera assembler ni código objeto, y el lexer/parser siempre los genera ANTLR.
 
 ## Requisitos
 
@@ -453,27 +457,39 @@ compile_source` la atrapa y deja `ast_svg=None`, sin afectar el resto de la comp
 
 ## Integración: `compiler_service.compile_source`
 
-Único compositor del pipeline completo (frontend → semántica core → semántica extendida
-→ visualización). Es el único punto que el IDE (o cualquier otro cliente) debería usar
-para compilar código Compiscript — nunca se instancian las etapas por separado fuera de
-este módulo (DIP).
+Único compositor del pipeline completo. Es el único punto que el IDE (o cualquier otro
+cliente) debería usar para compilar código Compiscript — nunca se instancian las etapas
+por separado fuera de este módulo (DIP).
+
+```
+source -> frontend -> semántica core -> semántica extendida
+       -> runtime_layout.prepare -> ExtendedTacGenerator -> serialize
+       (+ ast_visualizer para el SVG)
+```
 
 ```python
 from compiler.compiler_service import compile_source
 
-result = compile_source(source) -> CompilationResult(success, diagnostics, ast_svg)
+result = compile_source(source)
+# -> CompilationResult(success, diagnostics, ast_svg, tac_text, symbols)
 ```
 
 - `success`: `True` si hubo AST (sin error de sintaxis) y cero diagnósticos de error en
-  ninguna de las 3 etapas.
-- `diagnostics`: la lista completa y ordenada de las 3 etapas.
+  ninguna etapa. Las advertencias no cuentan.
+- `diagnostics`: la lista completa y ordenada de todas las etapas, sin duplicados.
 - `ast_svg`: el SVG del AST como string, o `None` si hubo error de sintaxis o si
   Graphviz/`dot` no está disponible en el entorno.
+- `tac_text`: el código intermedio serializado, o **`None` si hubo cualquier error**
+  léxico, sintáctico o semántico. Con errores ni siquiera se llama a `prepare`: no existe
+  un `IRProgram` construido sobre un programa inválido.
+- `symbols`: la tabla de símbolos completa. Cuando hubo TAC, además trae la información
+  de runtime que agregó `prepare` (slots, etiquetas, registros de activación, layouts).
 
 ## IDE
 
 Interfaz web mínima (Flask, una sola pantalla) para cargar un archivo `.cps` o pegar
-código Compiscript, compilarlo y ver diagnósticos + el AST como SVG. El editor tiene
+código Compiscript, compilarlo y ver diagnósticos, el AST como SVG, la tabla de símbolos y
+el **código intermedio (TAC)**, todo dentro de la página. El editor tiene
 resaltado léxico local, números de línea y navegación desde cada diagnóstico; esos
 colores no sustituyen al análisis semántico del compilador. El selector valida la
 extensión y el límite de 5 MiB antes de leer localmente el archivo; cargarlo no lo
@@ -492,7 +508,8 @@ python -m ide.app
 
 Abrir `http://127.0.0.1:5000/` en el navegador. El textarea trae un ejemplo mínimo;
 “Abrir archivo .cps” carga una fuente local y “Compilar” hace `POST /api/compile` con `{"source": "..."}` y pinta la respuesta
-(`{success, diagnostics[], ast_svg}`) en los paneles de diagnósticos y AST.
+(`{success, diagnostics[], ast_svg, tac_text, symbols, error}`) en los paneles de
+diagnósticos, AST, símbolos y TAC.
 
 - `Ctrl+Enter` (o `Cmd+Enter`) compila sin usar el ratón.
 - Los filtros separan errores y advertencias; “Copiar diagnósticos” conserva código,
@@ -500,15 +517,21 @@ Abrir `http://127.0.0.1:5000/` en el navegador. El textarea trae un ejemplo mín
 - El nombre del archivo indica si su contenido fue modificado localmente.
 - El panel AST distingue errores de frontend de una ausencia de Graphviz e incluye zoom,
   ajuste y descarga del SVG.
+- La pestaña **TAC** muestra el código intermedio con las funciones y etiquetas
+  resaltadas, y permite copiarlo o descargarlo como `.tac`. Si la compilación tiene
+  cualquier error, el panel se vacía y muestra **"No generado por errores"**: nunca queda
+  visible el TAC de una compilación anterior.
+- La pestaña **Símbolos** muestra, junto a cada símbolo, su información de runtime
+  (`global[0]`, `fn::A.m frame=2 slot=0`, `fields=1 metodos=1`, …).
 
 ### Estructura del IDE
 
 ```
 ide/
   app.py                 # rutas: GET / , POST /api/compile
-  templates/index.html   # una sola pantalla: editor + diagnosticos + ast
+  templates/index.html   # una sola pantalla: editor + diagnosticos + ast / simbolos / tac
   static/style.css
-  static/app.js           # fetch a /api/compile, sin logica semantica
+  static/app.js           # fetch a /api/compile, sin logica semantica ni de ir
 ```
 
 ## Generación de TAC core (Proyecto 02, Persona 2)
@@ -539,8 +562,8 @@ text = serialize(program)
   temporales u otro formato de texto. Todo pasa por `IRBuilder`, `RuntimeLayout` y
   `ScopedVisitor`.
 - Arreglos, objetos, `this`, `new`, `foreach` y `try`/`catch` lanzan
-  `UnsupportedConstructError`: los baja `ExtendedTacGenerator` (Persona 3), que hereda
-  de `CoreTacGenerator`. Para eso hay ganchos: `lower_member_assignment`
+  `UnsupportedConstructError`: los baja `ExtendedTacGenerator` (sección siguiente), que
+  hereda de `CoreTacGenerator`. Para eso hay ganchos: `lower_member_assignment`
   (`obj.x = v`, `a[i] = v`), `lower_method_call` (`obj.m(...)`), `emit_arguments`,
   `jump_targets` (para que `foreach` reutilice `break`/`continue`) y `visit_FunctionDecl`,
   que ya sirve para métodos y constructores.
@@ -606,24 +629,130 @@ pytest tests/person2_tac -v
   `test_functions.py` y `test_temp_recycling.py`. El contrato y los ejemplos del documento
   están en `test_api.py`, y las reglas de capas en `test_architecture.py`.
 
-## Cómo ejecutar todo
+## Generación de TAC extendido (arreglos, objetos, herencia, try/catch)
 
-```bash
-pip install -r requirements.txt
-pytest tests -q          # las 4 etapas juntas, desde la raiz del repositorio
-flask --app ide.app run  # opcional: levantar el ide para probar interactivamente
+`ExtendedTacGenerator` completa el generador con todo lo que el core rechaza: arreglos
+(incluidos multidimensionales), `foreach`, clases, objetos, constructores, `this`,
+atributos, métodos, herencia y `try`/`catch`. Es el generador que usa `compile_source`.
+
+### Contrato: `ExtendedTacGenerator.generate`
+
+```python
+from compiler.runtime.runtime_layout import prepare
+from compiler.tac.extended_generator import ExtendedTacGenerator
+from compiler.ir.serializer import serialize
+
+layout = prepare(semantic_result)
+program = ExtendedTacGenerator.generate(semantic_result, layout)   # -> IRProgram
+text = serialize(program)
 ```
 
-`pytest tests -q` corre los tests de las 4 etapas (frontend, semántica core, semántica
-extendida, integración) en un solo comando, tal como lo exige el criterio de aceptación
-del proyecto ("pytest completo pasa desde la raíz del repositorio").
+- Misma firma que `CoreTacGenerator.generate` (la hereda sin cambios) y el mismo rechazo
+  explícito (`ValueError`) de un `SemanticResult` con errores.
+- **Sustituye al core (LSP):** para cualquier programa del subconjunto core produce
+  exactamente el mismo IR. `tests/extended_tac/test_lsp.py` lo verifica contra todas las
+  fixtures doradas de `tests/fixtures/core_tac`.
+- No valida tipos ni nombres, no recalcula la jerarquía de clases y no arma texto TAC a
+  mano: campos y métodos salen del `ClassLayout` ya aplanado por `prepare`.
+
+### Estructura
+
+```
+compiler/tac/
+  extended_generator.py   # ExtendedTacGenerator: compone los lowerings sobre CoreTacGenerator
+  array_lowering.py       # NEW_ARR/ARR_SET, ARR_GET, asignación indexada, foreach (índice + LEN)
+  object_lowering.py      # clases, new (NEW_OBJ + inicializadores + constructor), this,
+                          # GET_FIELD/SET_FIELD, CALL_METHOD con el slot de despacho
+  exception_lowering.py   # TRY_BEGIN / TRY_END / GOTO / CATCH
+```
+
+### Cómo se baja cada construcción
+
+| Construcción | TAC |
+|---|---|
+| `[e0, e1]` | `t = NEW_ARR 2`, `ARR_SET t, 0, e0`, `ARR_SET t, 1, e1` |
+| `a[i]` / `a[i] = v` | `t = ARR_GET a, i` / `ARR_SET a, i, v` |
+| `m[i][j]` | dos `ARR_GET` encadenados (un arreglo de arreglos) |
+| `foreach (x in a)` | `a`, índice y `LEN` en temporales vivos todo el cuerpo; `L_foreach_cond/step/end`; `ARR_GET` + `MOV` a `x` |
+| `class C {...}` | sin código propio; cada método y el constructor son `fn::C.metodo` con `this` en `frame[0]` |
+| `new C(args)` | `t = NEW_OBJ C, fields=n`, `SET_FIELD` de los inicializadores, `ARG t`, `ARG args`, `CALL fn::C.constructor, argc=n+1` |
+| `obj.f` / `obj.f = v` | `t = GET_FIELD obj, f@field[k]` / `SET_FIELD obj, f@field[k], v` |
+| `obj.m(args)` | `ARG args`, `CALL_METHOD [t,] obj, m[slot], argc=n` |
+| herencia | campos heredados primero; un override reutiliza el slot del padre |
+| `try/catch` | `TRY_BEGIN L_try_handler`, try, `TRY_END`, `GOTO L_try_end`, `LABEL` handler, `CATCH e`, catch, `LABEL L_try_end` |
+
+### Decisiones de diseño (TAC extendido)
+
+Ninguna es una regla del lenguaje; si el catedrático indica otra cosa, se cambia primero
+`docs/INTERMEDIATE_CODE.md` y luego el código.
+
+- **Inicializadores de atributos** (`let v: integer = 0;` dentro de una clase): se evalúan
+  en el sitio del `new`, después de `NEW_OBJ` y antes del constructor, en el orden del
+  layout (heredados primero). Sus nombres se resuelven en el scope de la clase que los
+  declara, igual que en la semántica.
+- **El iterable de `foreach` se evalúa una sola vez** y se copia a un temporal propio:
+  reasignar la variable dentro del cuerpo no cambia el recorrido.
+- **Asignación a índice o atributo usada como valor** (`x = a[0] = 3`): el valor de la
+  expresión es el valor asignado, sin otro temporal.
+- **Orden izquierda → derecha también en receptores e índices:** si evaluar un argumento,
+  un índice o el valor asignado puede reescribir la variable ya leída (una llamada que
+  modifica una global, por ejemplo), esa variable se copia antes a un temporal.
+- **`return`/`break`/`continue` dentro de un `try`** salen del bloque protegido sin
+  `TRY_END` explícito: cerrar el manejador en esa salida es responsabilidad del backend.
+- **Método `void` usado como valor:** como con las funciones, se emite el `CALL_METHOD` sin
+  destino y el valor es `null`.
+
+### Tests
+
+```bash
+pytest tests/extended_tac -v
+pytest tests/integration/test_rubric_e2e.py -v   # una prueba por fila de la rúbrica, por la GUI
+```
+
+- `tests/fixtures/extended_tac/valid/*.cps` traen al lado su `.tac` esperado, revisado a
+  mano contra `docs/INTERMEDIATE_CODE.md` §9–10.
+- `tests/fixtures/extended_tac/invalid/*.cps` son errores semánticos de arreglos, clases,
+  `foreach` y `try/catch`: quedan en fase semántica y no generan IR.
+- Por constructo: `test_arrays.py`, `test_foreach.py`, `test_objects.py`,
+  `test_inheritance.py`, `test_exceptions.py` y `test_temps.py`. Contrato en `test_api.py`,
+  sustitución en `test_lsp.py` y reglas de capas en `test_architecture.py`.
+
+## Cómo ejecutar todo
+
+Desde un clon limpio:
+
+```bash
+pip install -r requirements.txt     # antlr4 runtime, pytest, flask, graphviz
+pytest tests -q                     # toda la suite, desde la raiz del repositorio
+flask --app ide.app run             # GUI en http://127.0.0.1:5000/
+```
+
+Regenerar el parser es opcional (la salida de ANTLR está versionada); ver "Regenerar
+ANTLR" más arriba.
+
+En la GUI: **Abrir archivo .cps** (por ejemplo `tests/grading/fixtures/valid_tac_complete.cps`),
+**Compilar**, y revisar las pestañas AST, Símbolos y TAC. Para el diagrama del AST hace
+falta el binario `dot` de Graphviz en el `PATH`; sin él, todo lo demás funciona igual.
+
+`pytest tests -q` corre en un solo comando los tests de todas las etapas: frontend,
+semántica core y extendida, IR y runtime, TAC core y extendido, integración y los
+fixtures de calificación.
 
 ## Fixtures para calificación
 
-`tests/grading/fixtures/` contiene cuatro programas pequeños que participan en pruebas
-automatizadas: `valid_complete.cps`, `semantic_errors.cps`, `lexical_recovery.cps` y
-`syntax_recovery.cps`. Sirven para demostrar compilación válida y recuperación léxica,
-sintáctica y semántica durante la evaluación.
+`tests/grading/fixtures/` contiene programas pequeños que participan en pruebas
+automatizadas y se pueden abrir directamente desde la GUI:
+
+| Archivo | Qué demuestra |
+|---|---|
+| `valid_tac_complete.cps` | compila sin diagnósticos y muestra TAC de todos los rubros (variables, aritmética, lógica, arreglos, control de flujo, funciones, recursión, clases, herencia, try/catch) |
+| `valid_complete.cps` | programa válido del análisis semántico, con su TAC |
+| `semantic_errors.cps` | varios errores semánticos en una sola corrida; no genera TAC |
+| `lexical_recovery.cps` | dos errores léxicos recuperados; no genera TAC |
+| `syntax_recovery.cps` | dos errores sintácticos recuperados; no genera TAC |
+
+`tests/integration/test_rubric_e2e.py` tiene una prueba por cada fila de la rúbrica de
+25 puntos que entra por `POST /api/compile`, igual que la GUI.
 
 ## Pendientes de confirmación docente
 
@@ -634,3 +763,14 @@ un entero; y los requisitos limitan `break` a bucles aunque Compiscript permite
 `break` en `switch`. El comportamiento actual conserva la gramática y los ejemplos
 oficiales: no hay `float`, `switch` acepta `integer`/`string`/`boolean` y `break` es
 válido en un `switch`.
+
+**`program/program.cps` (el ejemplo oficial) no genera TAC**, porque no pasa el análisis
+semántico del Proyecto 01:
+
+- 7 errores `CPS-104` por concatenaciones `string + integer`: la regla vigente solo admite
+  `string + string`;
+- 1 error `CPS-210` en `new Dog("Rex")`: los constructores no se heredan (regla 12).
+
+No se cambia la semántica hasta tener la confirmación docente. Mientras tanto,
+`tests/grading/fixtures/valid_tac_complete.cps` cubre las mismas construcciones
+respetando esas dos reglas.

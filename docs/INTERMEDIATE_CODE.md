@@ -1,8 +1,8 @@
 # Código intermedio de Compiscript (TAC)
 
 Especificación del lenguaje intermedio que genera el compilador. Es el contrato entre
-la infraestructura del IR (Persona 1) y los generadores de TAC (Persona 2: core,
-Persona 3: estructuras complejas). Los ejemplos de este documento **no están escritos a
+la infraestructura del IR y los generadores de TAC (`CoreTacGenerator` para el
+subconjunto core y `ExtendedTacGenerator` para arreglos, objetos, herencia y try/catch). Los ejemplos de este documento **no están escritos a
 mano**: los arma `tests/ir/test_intermediate_code_doc.py` con el `IRBuilder` real y el
 test falla si el texto deja de coincidir.
 
@@ -214,7 +214,9 @@ funciones; `layout` en clases.
   - `ClassLayout.constructor_label` es `None` si la clase no declara constructor propio.
 - **Instanciación** `new C(args)`, en este orden:
   1. `t = NEW_OBJ C, fields=layout.size`;
-  2. si hay inicializadores de atributos, `SET_FIELD t, ...` en el orden del layout (heredados primero);
+  2. si hay inicializadores de atributos, `SET_FIELD t, ...` en el orden del layout (heredados primero).
+     El inicializador se evalúa en el sitio del `new` (decisión de diseño), pero sus nombres se
+     resuelven en el scope de la clase que lo declara, igual que en la semántica;
   3. si C tiene constructor: `ARG t` (que pasa a ser `this`), los `ARG` de los argumentos y
      `CALL fn::C.constructor, argc=n+1`.
 - **Llamada a método** `obj.m(args)`, en este orden:
@@ -223,8 +225,11 @@ funciones; `layout` en clases.
   3. `CALL_METHOD [R,] receptor, m[slot], argc=n`.
 
   El slot sale de `layout.method_named(m)` usando el tipo estático del receptor.
+- **Atributos:** `obj.f` es `t = GET_FIELD obj, f@field[k]` y `obj.f = v` es `SET_FIELD obj, f@field[k], v`.
+  El slot sale de `layout.field_named(f)` sobre el tipo estático de `obj`. El generador nunca recorre
+  la jerarquía de clases: todo sale del layout ya aplanado.
 
-## 10. Convenciones de lowering (Persona 2 y Persona 3)
+## 10. Convenciones de lowering
 
 - **Orden de evaluación:** izquierda a derecha en operandos y argumentos, respetando la precedencia que ya
   fija el AST.
@@ -285,6 +290,18 @@ funciones; `layout` en clases.
   2. el bloque `try`, `TRY_END` y `GOTO L_try_end`;
   3. `LABEL L_try_handler` y `CATCH variable`;
   4. el bloque `catch` y `LABEL L_try_end`.
+
+  Un `return`, `break` o `continue` dentro del `try` sale del bloque protegido sin `TRY_END`
+  explícito: cerrar el manejador en esa salida le corresponde al backend (decisión de diseño).
+- **Arreglos:**
+  - Literal `[e0, …, en-1]`: `t = NEW_ARR n` y un `ARR_SET t, i, ei` por elemento, en orden.
+  - Un arreglo multidimensional es un arreglo cuyos elementos son arreglos: `m[i][j]` son dos
+    `ARR_GET` encadenados y `m[i][j] = v` es un `ARR_GET` seguido de un `ARR_SET`.
+- **Asignación a índice o atributo usada como valor** (`x = a[i] = v`): el valor de la expresión es
+  `v`, sin otro temporal (decisión de diseño, igual que con variables).
+- **Orden de evaluación con receptores e índices:** si un argumento, un índice o el valor asignado
+  puede reescribir una variable ya leída como arreglo o receptor (por ejemplo, una llamada que
+  modifica una global), esa variable se copia antes a un temporal.
 
 ## 11. Cuándo se genera IR
 
