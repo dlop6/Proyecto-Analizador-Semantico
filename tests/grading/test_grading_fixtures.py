@@ -34,3 +34,27 @@ def test_fixture_lexico_recupera_y_reporta_dos_caracteres():
 def test_fixture_sintactico_recupera_y_reporta_dos_errores():
     result = analyze_source(_source("syntax_recovery.cps"))
     assert [diagnostic.code for diagnostic in result.diagnostics].count("CPS-001") >= 2
+
+
+def test_fixture_tac_integral_genera_codigo_intermedio_de_todos_los_rubros():
+    result = compile_source(_source("valid_tac_complete.cps"))
+    assert result.success is True
+    assert result.diagnostics == []
+    text = result.tac_text
+    for fragment in (
+        "NEW_OBJ Perro", "CALL fn::Perro.constructor", "CALL_METHOD", "hablar[0]",  # clases y herencia
+        "NEW_ARR 4", "ARR_GET", "ARR_SET", "LEN",                                    # arreglos y foreach
+        "L_foreach_cond", "L_while_cond", "L_switch_case", "L_if_end",               # control de flujo
+        "L_or_end", "L_and_end",                                                     # logica con cortocircuito
+        "CALL t1, fn::factorial, argc=1",                                            # recursion
+        "TRY_BEGIN", "TRY_END", "CATCH error@global",                                # try/catch
+        "FUNC_END fn::factorial, temps=",                                            # pico de temporales
+    ):
+        assert fragment in text, fragment
+
+
+def test_los_fixtures_con_errores_no_generan_tac():
+    for name in ("semantic_errors.cps", "lexical_recovery.cps", "syntax_recovery.cps"):
+        result = compile_source(_source(name))
+        assert result.success is False
+        assert result.tac_text is None
