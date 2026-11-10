@@ -1,6 +1,6 @@
 """tests de compiler/expression_rules.py: funciones puras de tipos, sin ast ni scopes."""
 from compiler.expression_rules import check_binary_op, check_condition, check_ternary, check_unary_op
-from compiler.types import BOOLEAN, ClassType, ERROR, INTEGER, NULL, STRING
+from compiler.types import ArrayType, BOOLEAN, ClassType, ERROR, INTEGER, NULL, STRING
 
 
 # ---------- operadores aritmeticos y '+' ----------
@@ -17,10 +17,24 @@ def test_concatenacion_string_da_string():
     assert code is None
 
 
-def test_suma_entero_mas_string_es_invalida():
-    result, code, detail = check_binary_op("+", INTEGER, STRING)
+def test_concatenacion_string_con_entero_o_booleano_da_string():
+    # asi lo usa el ejemplo oficial program.cps: "Number: " + n
+    for left, right in ((STRING, INTEGER), (INTEGER, STRING), (STRING, BOOLEAN), (BOOLEAN, STRING)):
+        result, code, detail = check_binary_op("+", left, right)
+        assert result == STRING
+        assert code is None
+
+
+def test_concatenacion_con_null_clase_o_arreglo_es_invalida():
+    for other in (NULL, ClassType("Animal"), ArrayType(INTEGER)):
+        result, code, detail = check_binary_op("+", STRING, other)
+        assert code == "CPS-104"
+        assert result == ERROR
+
+
+def test_suma_entero_mas_booleano_es_invalida():
+    result, code, detail = check_binary_op("+", INTEGER, BOOLEAN)
     assert code == "CPS-104"
-    assert result == ERROR
 
 
 def test_resta_entre_strings_es_invalida():

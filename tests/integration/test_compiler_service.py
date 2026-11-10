@@ -1,7 +1,7 @@
 """
 tests de integracion: compiler_service.compile_source, el UNICO compositor del pipeline
-completo (frontend -> core -> extended -> visualizacion). corre sobre codigo fuente real,
-sin mockear ninguna etapa -- es la prueba de que las 3 etapas encajan.
+completo (frontend -> core -> extended -> runtime layout -> tac -> visualizacion). corre
+sobre codigo fuente real, sin mockear ninguna etapa -- es la prueba de que todo encaja.
 """
 from pathlib import Path
 
@@ -17,8 +17,9 @@ PROGRAM_DIR = Path(__file__).resolve().parents[2] / "program"
 def test_compilation_result_tiene_exactamente_los_campos_esperados():
     # symbols se agrego para que el ide pueda mostrar la tabla de simbolos completa
     # (insercion/recuperacion/actualizacion/manejo de ambitos), no solo explicarla.
+    # tac_text es el codigo intermedio serializado (None si hubo cualquier error).
     field_names = {f.name for f in dataclasses.fields(CompilationResult)}
-    assert field_names == {"success", "diagnostics", "ast_svg", "symbols"}
+    assert field_names == {"success", "diagnostics", "ast_svg", "tac_text", "symbols"}
 
 
 # ---------- programa valido de punta a punta ----------
@@ -69,12 +70,12 @@ def test_programa_con_errores_semanticos_de_clases_y_arreglos_no_success():
     assert "CPS-207" in codes
 
 
-def test_programa_oficial_de_ejemplo_compila(tmp_path=None):
-    program_file = PROGRAM_DIR / "program.cps"
-    if not program_file.exists():
-        return  # el archivo de ejemplo es opcional, no todos los entornos lo traen
-    source = program_file.read_text(encoding="utf-8")
+def test_programa_oficial_de_ejemplo_compila_sin_errores_y_genera_tac():
+    # el ejemplo oficial usa concatenacion string + integer y un constructor heredado
+    # (new Dog("Rex") con el constructor de Animal): ambos son validos
+    source = (PROGRAM_DIR / "program.cps").read_text(encoding="utf-8")
     result = compile_source(source)
-    # no se exige que sea valido semanticamente (es un ejemplo, no una fixture curada),
-    # pero el pipeline completo no debe reventar sobre el.
-    assert isinstance(result.diagnostics, list)
+    assert result.success is True
+    assert result.diagnostics == []
+    assert "CALL fn::Animal.constructor, argc=2" in result.tac_text
+    assert 'BIN +, "5 + 1 = ", addFive@global[5]' in result.tac_text

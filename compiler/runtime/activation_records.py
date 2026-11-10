@@ -87,7 +87,7 @@ class ClassLayout:
     parent_name: str | None
     fields: tuple[FieldEntry, ...]    # heredados primero, propios despues
     methods: tuple[MethodEntry, ...]  # tabla de despacho completa, por slot
-    constructor_label: str | None     # los constructores no se heredan (regla 12)
+    constructor_label: str | None     # el propio o el del ancestro mas cercano; None si ninguno
 
     def __post_init__(self) -> None:
         _check_consecutive([f.slot for f in self.fields], f"campos de {self.class_name}")

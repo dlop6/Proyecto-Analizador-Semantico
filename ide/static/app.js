@@ -14,6 +14,14 @@
   const copyStatusEl = document.getElementById("copy-status");
   const astEl = document.getElementById("ast-container");
   const symbolsEl = document.getElementById("symbols-container");
+  const tacEl = document.getElementById("tac-container");
+  const tacStateEl = document.getElementById("tac-state");
+  const tacOutputEl = document.getElementById("tac-output");
+  const tacCodeEl = document.getElementById("tac-code");
+  const tacControlsGroupEl = document.getElementById("tac-controls");
+  const tacCopyEl = document.getElementById("tac-copy");
+  const tacDownloadEl = document.getElementById("tac-download");
+  const tacStatusEl = document.getElementById("tac-status");
   const viewTabsEl = document.getElementById("view-tabs");
   const astControlsGroupEl = document.getElementById("ast-controls");
   const btnEl = document.getElementById("compile-btn");
@@ -48,6 +56,12 @@
   let astScale = 1;
   let astDimensions = null;
   let activeView = "ast";
+  let currentTac = null;
+
+  // Mensajes del panel TAC. Si la compilación tiene cualquier error el panel se vacía
+  // y lo dice explícitamente: nunca queda visible el TAC de una compilación anterior.
+  const TAC_NOT_GENERATED = "No generado por errores: corregí los diagnósticos y volvé a compilar.";
+  const TAC_PENDING = "Compilá para generar el código intermedio.";
 
   function createTextNode(text, className) {
     if (!className) return document.createTextNode(text);
@@ -203,14 +217,15 @@
     }
   }
 
-  // AST y tabla de símbolos comparten la 3ra columna como pestañas: solo uno de
-  // los dos paneles está visible a la vez, y los controles de zoom del AST solo
-  // tienen sentido cuando esa pestaña está activa.
+  // AST, tabla de símbolos y TAC comparten la 3ra columna como pestañas: solo un
+  // panel está visible a la vez, y cada grupo de controles solo aparece con su pestaña.
   function setActiveView(view) {
     activeView = view;
     astEl.hidden = view !== "ast";
     symbolsEl.hidden = view !== "symbols";
+    tacEl.hidden = view !== "tac";
     astControlsGroupEl.hidden = view !== "ast";
+    tacControlsGroupEl.hidden = view !== "tac";
     for (const button of viewTabsEl.querySelectorAll("button[data-view]")) {
       const active = button.dataset.view === view;
       button.classList.toggle("active", active);
@@ -229,6 +244,57 @@
     updateFilterButtons();
     setAstEmpty("Compilá para generar el árbol.");
     renderSymbols(null);
+    renderTac(null, TAC_PENDING);
+  }
+
+  // Clase visual de una línea del TAC: solo distingue la forma de la línea
+  // (unidad, etiqueta o instrucción); no interpreta ni ejecuta el código intermedio.
+  function tacLineClass(line) {
+    if (line.startsWith("FUNC_BEGIN") || line.startsWith("FUNC_END")) return "tac-func";
+    if (line.startsWith("LABEL")) return "tac-label";
+    return "tac-instr";
+  }
+
+  // El TAC llega ya serializado por el backend; acá solo se muestra, línea por línea y
+  // siempre con textContent. Sin TAC (errores, red o una carga nueva) se limpia todo.
+  function renderTac(tacText, emptyMessage) {
+    currentTac = typeof tacText === "string" ? tacText : null;
+    tacStatusEl.textContent = "";
+    tacStatusEl.className = "utility-status";
+    tacCopyEl.disabled = currentTac === null;
+    tacDownloadEl.disabled = currentTac === null;
+    if (currentTac === null) {
+      tacCodeEl.replaceChildren();
+      tacOutputEl.hidden = true;
+      tacStateEl.className = "hint";
+      tacStateEl.textContent = emptyMessage;
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    const lines = currentTac.split("\n");
+    lines.forEach((line, index) => {
+      fragment.appendChild(createTextNode(line, line.trim() ? tacLineClass(line) : "tac-blank"));
+      if (index < lines.length - 1) fragment.appendChild(document.createTextNode("\n"));
+    });
+    tacCodeEl.replaceChildren(fragment);
+    tacOutputEl.hidden = false;
+    tacStateEl.className = "hint ok";
+    const lineCount = lines.filter((line) => line.trim()).length;
+    tacStateEl.textContent = currentTac
+      ? `Código intermedio generado | ${formatCount(lineCount, "línea", "líneas")}`
+      : "Código intermedio generado (programa vacío).";
+  }
+
+  async function copyTac() {
+    if (currentTac === null) return;
+    try {
+      await navigator.clipboard.writeText(currentTac);
+      tacStatusEl.textContent = "TAC copiado.";
+      tacStatusEl.className = "utility-status ok";
+    } catch (_error) {
+      tacStatusEl.textContent = "El navegador no permitió copiar el TAC.";
+      tacStatusEl.className = "utility-status fail";
+    }
   }
 
   function diagnosticKey(diag) {
@@ -383,6 +449,14 @@
       if (symbol.is_param) item.appendChild(buildFlag("param"));
     }
 
+    // información de runtime (slot, etiqueta, frame) que agrega el layout cuando hubo TAC
+    if (symbol.runtime) {
+      const runtime = document.createElement("span");
+      runtime.className = "symbol-runtime";
+      runtime.textContent = symbol.runtime;
+      item.appendChild(runtime);
+    }
+
     if (symbol.kind === "class" && (symbol.fields.length || symbol.methods.length)) {
       const members = document.createElement("ul");
       members.className = "symbol-list class-members";
@@ -445,6 +519,7 @@
       setStatus(data.error, "fail");
       setAstEmpty("No hay AST disponible para esta solicitud.");
       renderSymbols(null);
+      renderTac(null, TAC_NOT_GENERATED);
       return;
     }
     currentDiagnostics = Array.isArray(data.diagnostics) ? data.diagnostics : [];
@@ -460,6 +535,7 @@
     renderDiagnostics();
     renderAstResult(data);
     renderSymbols(data.symbols);
+    renderTac(data.success ? data.tac_text : null, TAC_NOT_GENERATED);
   }
 
   function diagnosticsText() {
@@ -530,6 +606,7 @@
       setStatus("No se pudo compilar: respuesta inválida o error de red.", "fail");
       setAstEmpty("No hay AST disponible mientras no haya una respuesta válida.");
       renderSymbols(null);
+      renderTac(null, TAC_NOT_GENERATED);
     } finally {
       compiling = false;
       btnEl.disabled = false;
@@ -579,6 +656,17 @@
   astZoomOutEl.addEventListener("click", () => changeAstScale(-0.1));
   astResetEl.addEventListener("click", () => { astScale = 1; applyAstScale(); });
   astFitEl.addEventListener("click", fitAst);
+  tacCopyEl.addEventListener("click", copyTac);
+  tacDownloadEl.addEventListener("click", () => {
+    if (currentTac === null) return;
+    const blob = new Blob([currentTac], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "compiscript.tac";
+    link.click();
+    URL.revokeObjectURL(url);
+  });
   astDownloadEl.addEventListener("click", () => {
     if (!currentAstSvg) return;
     const blob = new Blob([currentAstSvg], { type: "image/svg+xml;charset=utf-8" });

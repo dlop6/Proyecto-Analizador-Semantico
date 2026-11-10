@@ -109,7 +109,9 @@ Se documentan; no se corrigieron en este gate.
   - 7 errores `CPS-104` por concatenaciones `string + integer`: la regla del Proyecto 01 solo admite
     `string + string`.
   - 1 error `CPS-210` en `new Dog("Rex")`: los constructores no se heredan (regla 12).
-  - Se deja así por decisión del equipo; lo resuelve Persona 3 en la integración final.
+  - **Resuelto en la integración final:** se sigue el ejemplo oficial, así que `+` concatena un
+    `string` con `integer`/`boolean` y una clase sin constructor usa el del ancestro más cercano.
+    `program.cps` ahora compila sin diagnósticos y genera TAC.
 - **No hay `float`** (decisión del proyecto).
 
 ## 8. Notas para Persona 2 y Persona 3

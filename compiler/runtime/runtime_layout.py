@@ -13,7 +13,8 @@ decisiones (detalladas en docs/INTERMEDIATE_CODE.md):
 - static link: solo si la funcion (o algo que llama, o algo anidado en ella) necesita
   llegar al frame de una funcion que la encierra.
 - clases: campos heredados primero; un override reusa el slot del padre; el
-  constructor no tiene slot de despacho porque no se hereda.
+  constructor no tiene slot de despacho (se llama directo) y, si la clase no declara
+  uno, su layout apunta al del ancestro mas cercano.
 - warnings no bloquean: el pdf corta la generacion por ERRORES.
 """
 from __future__ import annotations
@@ -207,7 +208,11 @@ def _assign_class_layouts(symbols: SymbolTable) -> dict[str, ClassLayout]:
         layout = ClassLayout(
             class_name=cls.name, parent_name=cls.parent.name if cls.parent is not None else None,
             fields=tuple(fields), methods=tuple(methods),
-            constructor_label=cls.constructor.label if cls.constructor is not None else None,
+            # sin constructor propio se usa el del ancestro mas cercano (ya resuelto en su layout)
+            constructor_label=(
+                cls.constructor.label if cls.constructor is not None
+                else parent.constructor_label if parent is not None else None
+            ),
         )
         cls.layout = layouts[cls.name] = layout
         return layout

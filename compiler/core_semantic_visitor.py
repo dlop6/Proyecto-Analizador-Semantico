@@ -293,9 +293,10 @@ class CoreSemanticVisitor(AstVisitor):
             node.inferred_type = target.inferred_type
             return
         # PropertyAccess / IndexAccess: destino de clases o arreglos, lo completa la
-        # etapa extendida (persona 3). se visita para no dejar sub-arboles sin recorrer.
+        # etapa extendida. se visita para no dejar sub-arboles sin recorrer. no se pisa
+        # inferred_type: en las re-pasadas de extended_semantics.analyze ya trae el tipo
+        # final y borrarlo dejaria sin validar al operador o condicion que lo contiene.
         self.visit(target)
-        node.inferred_type = None
 
     # ------------------------------------------------------------------
     # expresiones core
@@ -386,9 +387,9 @@ class CoreSemanticVisitor(AstVisitor):
             node.inferred_type = result
             return
         # llamada a metodo (callee es PropertyAccess) u otra forma: la resuelve la
-        # etapa extendida, que conoce clases y objetos.
+        # etapa extendida, que conoce clases y objetos. igual que con las asignaciones a
+        # miembros, no se pisa el tipo que esa etapa ya dejo en una pasada anterior.
         self.visit(callee)
-        node.inferred_type = None
 
     # ------------------------------------------------------------------
     # funciones y clases

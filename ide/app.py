@@ -1,6 +1,6 @@
 """
-ide minimo (flask, una sola pantalla): pega codigo compiscript, lo compila, muestra
-diagnosticos, el ast como svg y la tabla de simbolos. sin autenticacion, sin
+ide minimo (flask, una sola pantalla): pega o carga codigo compiscript, lo compila,
+muestra diagnosticos, el ast como svg, la tabla de simbolos y el codigo intermedio (tac). sin autenticacion, sin
 persistencia, sin autocompletado, sin debugger -- alcance exacto que pide el pdf
 para la etapa de integracion.
 
@@ -31,6 +31,33 @@ JSON_ENVELOPE_BYTES = 1024
 app.config["MAX_CONTENT_LENGTH"] = MAX_SOURCE_BYTES + JSON_ENVELOPE_BYTES
 
 
+def _runtime_info(sym: Symbol) -> str | None:
+    """
+    texto corto con la informacion de runtime que runtime_layout.prepare escribio en el
+    simbolo (slot, etiqueta, registro de activacion, layout). None si no hubo ir (por
+    ejemplo, una compilacion con errores). presentacion pura: solo lee campos ya calculados.
+    """
+    if isinstance(sym, FunctionSymbol):
+        record = sym.activation_record
+        if sym.label is None or record is None:
+            return None
+        parts = [sym.label, f"frame={record.frame_size}"]
+        if sym.method_slot is not None:
+            parts.append(f"slot={sym.method_slot}")
+        if record.static_link:
+            parts.append("static link")
+        return " ".join(parts)
+    if isinstance(sym, ClassSymbol):
+        layout = sym.layout
+        if layout is None:
+            return None
+        return f"fields={layout.size} metodos={len(layout.methods)}"
+    kind, slot = getattr(sym, "storage_kind", None), getattr(sym, "slot", None)
+    if kind is None or slot is None:
+        return None
+    return f"{kind.value}[{slot}]"
+
+
 def _serialize_symbol(sym: Symbol) -> dict:
     """
     representacion minima y uniforme de un simbolo para la ui: nombre, categoria
@@ -42,6 +69,7 @@ def _serialize_symbol(sym: Symbol) -> dict:
         "line": sym.line,
         "column": sym.column,
         "type": str(sym.type) if sym.type is not None else None,
+        "runtime": _runtime_info(sym),
     }
     if isinstance(sym, FunctionSymbol):
         base["kind"] = "function"
@@ -78,7 +106,8 @@ def _serialize_symbol_table(table: SymbolTable) -> dict:
 
 def _error_response(message: str, status: int):
     return jsonify({
-        "success": False, "diagnostics": [], "ast_svg": None, "symbols": None, "error": message,
+        "success": False, "diagnostics": [], "ast_svg": None, "tac_text": None, "symbols": None,
+        "error": message,
     }), status
 
 
@@ -119,6 +148,7 @@ def api_compile():
         ],
         "symbols": _serialize_symbol_table(result.symbols),
         "ast_svg": result.ast_svg,
+        "tac_text": result.tac_text,
         "error": None,
     })
 

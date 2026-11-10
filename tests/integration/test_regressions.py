@@ -125,8 +125,13 @@ def test_foreach_con_atributo_arreglo_asigna_el_tipo_del_elemento():
 
 
 def test_operacion_con_indice_extendido_no_se_acepta():
-    source = 'let a: integer[] = [1]; let x: string = a[0] + "y";'
+    # el tipo de a[0] lo resuelve la etapa extendida; la re-pasada core igual valida el '-'
+    source = 'let a: integer[] = [1]; let x: integer = a[0] - "y";'
     assert "CPS-104" in codes(source)
+
+
+def test_concatenacion_con_indice_extendido_se_acepta():
+    assert analyze_full('let a: integer[] = [1]; let x: string = a[0] + "y";').ok
 
 
 def test_inferencia_encadenada_de_arreglos_actualiza_simbolos():
@@ -207,10 +212,18 @@ def test_arreglo_vacio_con_contexto_es_valido():
     assert analyze_full("let xs: integer[] = [];").ok
 
 
-def test_subclase_sin_constructor_solo_acepta_cero_argumentos():
-    source = "class A { function constructor(x: integer) {} } class B : A {} let b: B = new B(1);"
-    assert "CPS-210" in codes(source)
-    assert analyze_full("class A { function constructor(x: integer) {} } class B : A {} let b: B = new B();").ok
+def test_subclase_sin_constructor_usa_el_constructor_heredado():
+    # asi lo usa el ejemplo oficial program.cps: class Dog : Animal {...}; new Dog("Rex")
+    base = "class A { function constructor(x: integer) {} } class B : A {} "
+    assert analyze_full(base + "let b: B = new B(1);").ok
+    assert "CPS-210" in codes(base + "let b: B = new B();")
+    assert "CPS-211" in codes(base + 'let b: B = new B("x");')
+
+
+def test_clase_sin_constructor_en_toda_la_cadena_solo_acepta_cero_argumentos():
+    base = "class A {} class B : A {} "
+    assert analyze_full(base + "let b: B = new B();").ok
+    assert "CPS-210" in codes(base + "let b: B = new B(1);")
 
 
 def test_svg_escape_texto_del_usuario():
@@ -231,7 +244,8 @@ def test_errores_http_tienen_esquema_uniforme():
     client = app.test_client()
     response = client.post("/api/compile", json={"source": 123})
     assert response.status_code == 400
-    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "symbols", "error"}
+    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "tac_text", "symbols", "error"}
+    assert response.get_json()["tac_text"] is None
 
 
 def test_json_malformado_tiene_esquema_uniforme():
@@ -239,7 +253,8 @@ def test_json_malformado_tiene_esquema_uniforme():
     client = app.test_client()
     response = client.post("/api/compile", data="{", content_type="application/json")
     assert response.status_code == 400
-    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "symbols", "error"}
+    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "tac_text", "symbols", "error"}
+    assert response.get_json()["tac_text"] is None
 
 
 def test_request_demasiado_grande_se_rechaza_antes_de_compilar():
@@ -250,7 +265,8 @@ def test_request_demasiado_grande_se_rechaza_antes_de_compilar():
         json={"source": "x" * (MAX_SOURCE_BYTES + JSON_ENVELOPE_BYTES + 1)},
     )
     assert response.status_code == 413
-    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "symbols", "error"}
+    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "tac_text", "symbols", "error"}
+    assert response.get_json()["tac_text"] is None
 
 
 def test_architecture_documentada_y_referenciada():
@@ -299,3 +315,28 @@ def test_ninguna_fixture_reporta_la_misma_causa_dos_veces():
         diagnostics = compile_source(fixture.read_text(encoding="utf-8")).diagnostics
         keys = [(d.line, d.column, d.message) for d in diagnostics]
         assert len(keys) == len(set(keys)), f"{fixture.name}: {keys}"
+
+
+# ---------- regresion: tipos de llamadas a metodo en las re-pasadas core <-> extendida ----------
+
+def test_operador_y_condicion_sobre_llamada_a_metodo_se_validan_con_su_tipo_final():
+    # antes la core volvia a poner None en cada re-pasada y estos errores pasaban sin diagnostico
+    source = """
+    class A { function m(): string { return "x"; } }
+    let a: A = new A();
+    let y: integer = a.m() * 2;
+    if (a.m()) { print(1); }
+    """
+    codes = {d.code for d in compile_source(source).diagnostics}
+    assert {"CPS-104", "CPS-109"} <= codes
+
+
+def test_expresion_valida_con_llamada_a_metodo_queda_tipada_para_el_ir():
+    source = """
+    class A { function m(): string { return "x"; } }
+    let a: A = new A();
+    let s: string = a.m() + "y";
+    """
+    result = compile_source(source)
+    assert result.success is True
+    assert 'BIN +, t1, "y"' in result.tac_text

@@ -131,3 +131,65 @@ def test_compile_sin_source_no_revienta(client):
 def test_compile_con_source_no_string_da_400(client):
     response = client.post("/api/compile", json={"source": 123})
     assert response.status_code == 400
+
+
+# ---------- codigo intermedio (tac) en la gui ----------
+
+def _client_script() -> str:
+    with open(app.root_path + "/static/app.js", encoding="utf-8") as javascript:
+        return javascript.read()
+
+
+def test_index_ofrece_la_pestana_y_el_panel_del_tac(client):
+    html = client.get("/").data
+    assert b'data-view="tac"' in html
+    assert b'id="tac-container"' in html
+    assert b'id="tac-code"' in html
+    assert b'id="tac-copy"' in html
+
+
+def test_compile_programa_valido_devuelve_el_tac_serializado(client):
+    response = client.post("/api/compile", json={"source": "let x: integer = 1 + 2;\nprint(x);"})
+    body = response.get_json()
+    assert body["success"] is True
+    assert body["tac_text"].splitlines() == ["  t0 = BIN +, 1, 2", "  MOV x@global[0], t0", "  PRINT x@global[0]"]
+
+
+@pytest.mark.parametrize("source", [
+    "@ let x: integer = 1;",                 # lexico
+    "let x: integer = ;",                    # sintactico
+    "let x: integer = \"texto\";",           # semantico
+])
+def test_compile_con_cualquier_error_no_devuelve_tac(client, source):
+    body = client.post("/api/compile", json={"source": source}).get_json()
+    assert body["success"] is False
+    assert body["tac_text"] is None
+
+
+def test_cliente_limpia_el_tac_y_muestra_estado_explicito_si_hay_errores():
+    contents = _client_script()
+    assert "No generado por errores" in contents
+    assert "renderTac(data.success ? data.tac_text : null, TAC_NOT_GENERATED)" in contents
+    assert "tacCodeEl.replaceChildren()" in contents
+
+
+def test_cliente_pinta_el_tac_solo_con_textcontent():
+    contents = _client_script()
+    render = contents[contents.index("function renderTac"):contents.index("async function copyTac")]
+    assert "innerHTML" not in render
+    assert "createTextNode" in render
+
+
+def test_la_tabla_de_simbolos_expone_la_informacion_de_runtime(client):
+    source = "class A { let v: integer = 1; function m(): integer { return this.v; } }\nlet a: A = new A();"
+    body = client.post("/api/compile", json={"source": source}).get_json()
+    runtime = {s["name"]: s["runtime"] for s in body["symbols"]["symbols"]}
+    assert runtime["a"] == "global[0]"
+    assert runtime["A"] == "fields=1 metodos=1"
+    method = body["symbols"]["symbols"][0]["methods"][0]
+    assert method["runtime"] == "fn::A.m frame=1 slot=0"
+
+
+def test_sin_ir_la_tabla_de_simbolos_no_inventa_informacion_de_runtime(client):
+    body = client.post("/api/compile", json={"source": "let x: integer = \"a\";"}).get_json()
+    assert all(s["runtime"] is None for s in body["symbols"]["symbols"])

@@ -28,8 +28,15 @@ def test_comparacion_infiere_boolean():
     assert result.ast.statements[0].initializer.inferred_type == BOOLEAN
 
 
-def test_sumar_entero_y_string_reporta_cps104():
-    assert "CPS-104" in codes_of(analyze_full("let x = 1 + \"a\";"))
+def test_concatenar_string_con_entero_infiere_string():
+    frontend_result = analyze_source('let n: integer = 5; let x = "Number: " + n;')
+    result = analyze(frontend_result)
+    assert codes_of(result) == set()
+    assert result.ast.statements[1].initializer.inferred_type == STRING
+
+
+def test_concatenar_string_con_arreglo_reporta_cps104():
+    assert "CPS-104" in codes_of(analyze_full('let a: integer[] = [1]; let x = "a" + a;'))
 
 
 def test_and_con_operando_entero_reporta_cps107():

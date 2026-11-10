@@ -148,7 +148,7 @@ def numeric_result(a: Type, b: Type) -> Type | None:
     tipo resultante de aplicar +, -, *, / o % entre `a` y `b`, o None si la operacion no aplica.
     con integer como unico numerico esto es simple, pero es EL punto central de la regla:
     si el dia de mañana se agrega float, se cambia esta funcion y ya. no maneja
-    string+string (esa es una regla del operador +, no de "lo numerico" -> le toca a la semantica core).
+    concatenacion con string (esa es una regla del operador +, no de "lo numerico" -> le toca a la semantica core).
     """
     if isinstance(a, ErrorType) or isinstance(b, ErrorType):
         return ERROR
