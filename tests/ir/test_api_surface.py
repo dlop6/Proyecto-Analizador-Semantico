@@ -26,6 +26,7 @@ def test_semantic_result_es_el_resultado_semantico_final():
     (runtime_layout.RuntimeLayout.enclosing_function, ["self", "fn"]),
     (runtime_layout.RuntimeLayout.ref_for, ["self", "symbol", "from_function"]),
     (runtime_layout.RuntimeLayout.link_hops, ["self", "caller", "callee"]),
+    (runtime_layout.RuntimeLayout.storage_type, ["self", "ref", "from_function"]),
     (builder.IRBuilder.__init__, ["self", "layout"]),
     (builder.IRBuilder.new_temp, ["self", "type_"]),
     (builder.IRBuilder.release_temp, ["self", "temp"]),
