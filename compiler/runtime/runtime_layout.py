@@ -31,6 +31,7 @@ from compiler.runtime.scoped_visitor import ScopedVisitor, all_functions, index_
 from compiler.runtime.storage import FRAME_KINDS, StorageKind, StorageRef
 from compiler.scopes import Scope, ScopeKind, SymbolTable
 from compiler.symbols import THIS_NAME, ClassSymbol, FunctionSymbol, Symbol, VariableSymbol
+from compiler.types import Type
 
 
 def require_semantic_success(result: SemanticResult) -> None:
@@ -50,7 +51,9 @@ class RuntimeLayout:
         parents: dict[int, FunctionSymbol | None],
         class_layouts: dict[str, ClassLayout],
         index: dict[tuple[int, int], Scope],
+        storage_types: dict[tuple[str | None, int], Type] | None = None,
     ) -> None:
+        self._storage_types = MappingProxyType(dict(storage_types or {}))
         self._labels = labels
         self._globals_count = globals_count
         self._functions = tuple(functions)
@@ -99,6 +102,29 @@ class RuntimeLayout:
             raise RuntimeError(f"{from_function.label} accede a '{symbol.name}' de otro frame sin static link")
         return StorageRef(StorageKind.NONLOCAL, symbol.slot, lexical_depth=hops, name=symbol.name)
 
+    def storage_type(self, ref: StorageRef, from_function: FunctionSymbol | None) -> Type:
+        """
+        tipo de la variable a la que apunta `ref` visto desde `from_function` (None = codigo
+        global). el StorageRef no lleva tipo, y el backend lo necesita (imprimir, concatenar,
+        comparar strings). los campos no se resuelven aca: su tipo lo da el temporal del
+        GET_FIELD/SET_FIELD, porque el slot de un campo depende de la clase.
+        """
+        if ref.kind is StorageKind.FIELD:
+            raise ValueError(f"el tipo del campo '{ref.name}' lo da la instruccion, no el layout")
+        if ref.kind is StorageKind.GLOBAL:
+            owner = None
+        else:
+            if from_function is None:
+                raise ValueError(f"'{ref.name}' vive en un frame y se pidio desde el codigo global")
+            fn = from_function
+            for _ in range(ref.lexical_depth):
+                fn = self._parents[id(fn)]
+            owner = fn.label
+        found = self._storage_types.get((owner, ref.slot))
+        if found is None:
+            raise ValueError(f"no hay tipo registrado para '{ref.name}' (slot {ref.slot} en {owner or 'global'})")
+        return found
+
     def link_hops(self, caller: FunctionSymbol | None, callee: FunctionSymbol) -> int | None:
         """
         saltos de static link desde el frame del que llama hasta el frame que hay que
@@ -136,12 +162,24 @@ def prepare(result: SemanticResult) -> RuntimeLayout:
     for fn in functions:
         fn.activation_record = _activation_record(fn, parents, links)
 
-    return RuntimeLayout(labels, globals_count, functions, parents, class_layouts, index)
+    return RuntimeLayout(labels, globals_count, functions, parents, class_layouts, index, _storage_types(symbols))
 
 
 # ----------------------------------------------------------------------
 # helpers de prepare
 # ----------------------------------------------------------------------
+
+def _storage_types(symbols: SymbolTable) -> dict[tuple[str | None, int], Type]:
+    """(dueño, slot) -> tipo, para globales (dueño None) y variables de frame. los campos no entran."""
+    types: dict[tuple[str | None, int], Type] = {}
+    for scope in symbols.all_scopes():
+        for symbol in scope.symbols.values():
+            if (
+                isinstance(symbol, VariableSymbol) and symbol.type is not None
+                and symbol.storage_kind is not None and symbol.storage_kind is not StorageKind.FIELD
+            ):
+                types[(symbol.owner, symbol.slot)] = symbol.type
+    return types
 
 def _owning_function(scope: Scope | None, function_of: dict[int, FunctionSymbol]) -> FunctionSymbol | None:
     """la funcion cuyo frame contiene a `scope` (None si es codigo global o una clase)."""

@@ -252,3 +252,48 @@ def test_preparar_dos_veces_el_mismo_resultado_es_idempotente():
     second = prepare(result)
     assert _snapshot(first) == _snapshot(second)
     assert first.labels is not second.labels  # cada compilacion trae su propio LabelManager
+
+
+# ---------- storage_type: el StorageRef no lleva tipo, el layout lo resuelve ----------
+
+STORAGE_SOURCE = """
+let g: string = "hola";
+function outer(a: integer): integer {
+    let flag: boolean = true;
+    function inner(): integer { return a; }
+    return inner();
+}
+class C {
+    let f: integer;
+    function m(p: string): string { return p; }
+}
+"""
+
+
+def test_storage_type_global_param_local_this_y_nonlocal():
+    from compiler.types import BOOLEAN, INTEGER, STRING, ClassType
+
+    result, layout = layout_for(STORAGE_SOURCE)
+    outer, inner = function_named(layout, "fn::outer"), function_named(layout, "fn::outer.inner")
+    method = function_named(layout, "fn::C.m")
+    g = layout.ref_for(variable(result, "global", "g"), None)
+    assert layout.storage_type(g, None) == STRING
+    assert layout.storage_type(layout.ref_for(variable(result, "function:outer", "a"), outer), outer) == INTEGER
+    assert layout.storage_type(layout.ref_for(variable(result, "function:outer", "flag"), outer), outer) == BOOLEAN
+    # desde inner, 'a' es un nonlocal de un salto
+    from_inner = layout.ref_for(variable(result, "function:outer", "a"), inner)
+    assert from_inner.kind is NONLOCAL
+    assert layout.storage_type(from_inner, inner) == INTEGER
+    assert layout.storage_type(layout.ref_for(variable(result, "function:m", "p"), method), method) == STRING
+    this = next(s for s in layout.records["fn::C.m"].slots if s.kind is THIS)
+    assert layout.storage_type(StorageRef(THIS, this.slot, name="this"), method) == ClassType("C")
+
+
+def test_storage_type_de_campo_o_de_frame_sin_funcion_falla():
+    _, layout = layout_for(STORAGE_SOURCE)
+    with pytest.raises(ValueError):
+        layout.storage_type(StorageRef(FIELD, 0, name="f"), None)
+    with pytest.raises(ValueError):
+        layout.storage_type(StorageRef(LOCAL, 0, name="x"), None)
+    with pytest.raises(ValueError):
+        layout.storage_type(StorageRef(GLOBAL, 99, name="nada"), None)
