@@ -99,6 +99,15 @@ class _ClassHierarchyView:
         return result
 
 
+def _is_within(scope: Scope | None, ancestor: Scope) -> bool:
+    """True si `scope` es `ancestor` o esta anidado dentro de el."""
+    while scope is not None:
+        if scope is ancestor:
+            return True
+        scope = scope.parent
+    return False
+
+
 class _ScopeCursor:
     """context manager liviano: mueve el cursor del visitor a un scope ya existente y lo restaura al salir."""
 
@@ -311,7 +320,10 @@ class CoreSemanticVisitor(AstVisitor):
         if isinstance(symbol, VariableSymbol):
             # Las closures basicas solo capturan el entorno que ya existia al
             # declararse la funcion anidada; no implementamos hoisting de variables.
-            if (len(self._function_nodes) > 1 and declaring_scope is not self._current
+            # Solo aplica a lo CAPTURADO (declarado fuera de la funcion anidada actual):
+            # sus propios parametros y locales son visibles desde cualquier bloque interno.
+            if (len(self._function_nodes) > 1
+                    and not _is_within(declaring_scope, self._scope_at(self._function_nodes[-1]))
                     and (symbol.line, symbol.column) > (self._function_nodes[-1].line,
                                                          self._function_nodes[-1].column)):
                 self._emit("CPS-103", node.line, node.column, node.name)

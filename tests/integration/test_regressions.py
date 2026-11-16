@@ -340,3 +340,31 @@ def test_expresion_valida_con_llamada_a_metodo_queda_tipada_para_el_ir():
     result = compile_source(source)
     assert result.success is True
     assert 'BIN +, t1, "y"' in result.tac_text
+
+
+def test_parametros_y_locales_de_una_anidada_se_ven_desde_sus_bloques():
+    # antes la regla de "sin hoisting" trataba al parametro m como capturado de afuera
+    # porque el uso estaba en un bloque (if/while) y no directo en el cuerpo de r
+    source = """
+    function b(): integer {
+        function r(m: integer): integer {
+            let z: integer = 0;
+            if (m > 0) { print(m); }
+            while (m > 0) { z = z + m; m = m - 1; }
+            return z;
+        }
+        return r(3);
+    }
+    """
+    assert codes(source) == set()
+
+
+def test_capturar_una_variable_declarada_despues_de_la_anidada_sigue_siendo_error():
+    source = """
+    function b(): integer {
+        function r(): integer { if (true) { return tarde; } return 0; }
+        let tarde: integer = 5;
+        return r();
+    }
+    """
+    assert "CPS-103" in codes(source)
