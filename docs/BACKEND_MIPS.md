@@ -193,7 +193,7 @@ Las del IR no son válidas en MIPS (`::` no se acepta y `#` abre comentario). `m
 | Static link | argumento implícito | solo metadata `link=k`: el backend lo pasa primero |
 | Inicialización | — | el IR no inicializa: locales en cero en el prólogo, globales por `.space`, campos por `rt_alloc` |
 | `getReg` | API base | + `instruction()` para fijar registros por instrucción |
-| `CompilationResult` | con `asm_text` | todavía `(success, diagnostics, ast_svg, tac_text, symbols)`; lo extiende la integración |
+| `CompilationResult` | con `asm_text` | `(success, diagnostics, ast_svg, tac_text, symbols, asm_text, asm_unoptimized, peephole)` (integración, §15) |
 
 ## 14. Backend core: TAC → MIPS
 
@@ -283,3 +283,77 @@ Los programas core tienen que generar el mismo ensamblador con los dos backends 
 |---|---|
 | `addu`, `subu`, `addiu` | aritmética de 32 bits sin trap por overflow |
 | `movz`, `movn` | elegir un valor sin saltar, para no cortar los bloques del allocator |
+
+## 15. Backend extendido: arreglos, objetos, herencia y try/catch
+
+`ExtendedMipsBackend.generate(ir_program, runtime_layout)` tiene la misma API que el core y baja **todos** los opcodes del contrato. Es `ExtendedMipsBackend(ArrayLowering, ObjectLowering, ExceptionLowering, CoreMipsBackend)`: no edita el core.
+
+| Módulo | Opcodes |
+|---|---|
+| `array_lowering.py` | `NEW_ARR`, `ARR_GET`, `ARR_SET`, `LEN` |
+| `object_lowering.py` | `NEW_OBJ`, `GET_FIELD`, `SET_FIELD`, `CALL_METHOD` y las vtables |
+| `exception_lowering.py` | `TRY_BEGIN`, `TRY_END`, `CATCH` |
+| `extended_backend.py` | compone los anteriores; validación extra, vtables y `error_target()` |
+
+**Validación extra** (antes de emitir nada, junto con la del core, en un solo `IRContractError`): `TRY_BEGIN`/`TRY_END` balanceados en cada unidad; `NEW_ARR` con longitud `integer` constante entre 0 y `MAX_ARRAY_LENGTH` (65536; el TAC solo lo emite para literales); `NEW_OBJ` de una clase con layout y con `fields` igual al tamaño del layout.
+
+### Traducción
+
+| TAC | MIPS |
+|---|---|
+| `t = NEW_ARR n` | `rt_alloc(4 + 4n)` → `t`; `li $t8, n` y `sw $t8, 0(t)` (longitud) |
+| `t = ARR_GET a, i` | `rt_check_bounds(a, i)`, y `lw t, 4+4i(a)` con índice constante o `sll $t9, i, 2; addu $t9, $t9, a; lw t, 4($t9)` |
+| `ARR_SET a, i, v` | igual que `ARR_GET`, con `sw`. Si `a` es el temporal de un `NEW_ARR` del mismo bloque y el índice es una constante en rango (la inicialización de un literal), no se chequea |
+| `t = LEN a` | `rt_check_null(a)` y `lw t, 0(a)` |
+| `t = NEW_OBJ C, fields=k` | `rt_alloc(4 + 4k)` → `t`; `la $t8, vt_C` y `sw $t8, 0(t)` |
+| `t = GET_FIELD o, f@field[s]` | `rt_check_null(o)` (salvo `this`) y `lw t, 4+4s(o)` (`load_field`) |
+| `SET_FIELD o, f@field[s], v` | `rt_check_null(o)` (salvo `this`) y `sw v, 4+4s(o)` (`store_field`) |
+| `CALL_METHOD t, o, m[s], argc=n` | `rt_check_null(o)` (salvo `this`) y `emit_method_call`: `lw $t9, 0(o)`, `lw $t9, 4s($t9)`, argumentos con `this` primero, `jalr $t9`, chequeo de `$v1` |
+| `TRY_BEGIN L` / `TRY_END` | no emiten instrucciones: apilan / desapilan el manejador `L` |
+| `CATCH v` | `v = $v0` (el mensaje del error) |
+
+**Vtables.** Una por clase **instanciada** (las que aparecen en un `NEW_OBJ`), en `.data`, ordenadas por nombre: `vt_<Clase>: .word <impl slot 0>, <impl slot 1>, ...` (`vtable_entries`). Un override reusa el slot del padre y apunta a la implementación del hijo; un método heredado apunta a la del ancestro; el constructor no está. Una clase sin métodos lleva `.word 0` (`.word` no puede ir vacío). Un programa sin `NEW_OBJ` no tiene vtables (LSP).
+
+**Constructores.** El TAC ya emite, después del `NEW_OBJ`, un `SET_FIELD` por cada inicializador de campo y el `CALL` al constructor (propio o heredado, §13) con el objeto como primer argumento (`this`). El backend no agrega nada.
+
+### try/catch
+
+Los manejadores son **léxicos** y se resuelven al compilar. `TRY_BEGIN` apila la etiqueta del manejador y `TRY_END` la desapila, en el orden lineal del TAC. Mientras la pila no está vacía, `error_target()` devuelve el manejador de arriba, así cada `bne $v1, $zero, ...` del cuerpo (después de un helper que puede fallar o de una llamada) salta directo al catch más interno. Fuera de todo `try` es el destino del core: la salida de la función o `main_error`.
+
+- **Propagación entre llamadas.** Si la función llamada falla fuera de sus propios `try`, sale con `$v1 = 1` y el mensaje en `$v0`; el que llama revisa `$v1` con su propio `error_target()`. Así un error atraviesa cualquier cantidad de frames hasta el catch que corresponde, con `$sp` ya restaurado por cada epílogo.
+- **`return`/`break`/`continue` dentro del `try`** no emiten `TRY_END` (BASELINE_P3), pero no hace falta: el código que sigue linealmente hasta el `TRY_END` sigue siendo cuerpo del `try`, y una vez fuera de la función sus manejadores ya no aplican.
+- **El cuerpo del catch** está después del `TRY_END`: un error ahí va al `try` que encierra.
+- **Errores modelados**: `indice fuera de rango` (`rt_check_bounds`), `acceso a null` (`rt_check_null`, `rt_check_bounds`), `division entre cero` (`rt_check_divisor`, §14). Sin catch, `main_error` imprime `Error no capturado: <mensaje>` y termina con la syscall 10.
+
+### Helpers del backend extendido
+
+`RUNTIME = EXTENDED_RUNTIME`: el catálogo `CORE_RUNTIME` intacto (mismo orden) más dos helpers hoja, que como todos solo se emiten si se usan.
+
+| Helper | Implementación |
+|---|---|
+| `rt_check_null` | `beqz p` → `$v1 = 1`, `$v0 = "acceso a null"` |
+| `rt_check_bounds` | null → `"acceso a null"`; `blt i, $zero` o `bge i, len` → `"indice fuera de rango"`; la longitud es la palabra 0 |
+
+## 16. Optimización por mirilla
+
+`PeepholeOptimizer.optimize(assembly_program)` devuelve `(programa_optimizado, PeepholeReport)`. Trabaja sobre el `AssemblyProgram` estructurado (`AssemblyInstruction`/`LabelDef`), nunca sobre texto, y no toca `.data`. Seis transformaciones distintas:
+
+| Regla | Patrón | Acción | Por qué es segura |
+|---|---|---|---|
+| R1 | `move r, r` | eliminar | no cambia ningún registro |
+| R2 | `move r, s ; move r, s` | eliminar la segunda | adyacentes, sin etiqueta en medio y con `r != s`: la segunda no cambia nada |
+| R3 | `addiu r, s, 0` | `move r, s` | mismo valor; si `r == s`, R1 la elimina en la pasada siguiente |
+| R4 | `beq r, r, L` | `j L` | la condición siempre es verdadera |
+| R5 | `bne r, r, L` | eliminar | la condición nunca es verdadera |
+| R6 | `j L ; L:` | eliminar el `j` | `L` está entre las etiquetas que siguen inmediatamente: cayendo de largo se llega al mismo lugar |
+
+- Las ventanas son de una o dos instrucciones **adyacentes**: una etiqueta corta la ventana (alguien puede saltar ahí). No se mueve nada a través de etiquetas, saltos, llamadas ni límites de función, y no se borra ninguna etiqueta.
+- Se repiten las pasadas hasta que ninguna regla aplique (punto fijo). Cada pasada elimina o reescribe a una forma más simple, así que termina.
+- `PeepholeReport.applied` cuenta cada regla; `before`/`after` son las instrucciones (sin etiquetas) antes y después. La GUI muestra `summary()`, p. ej. `mirilla: 65 -> 64 instrucciones (R3x2, R6x1)`.
+- **Pruebas** (`tests/person3_mips/test_peephole.py`): cada regla en un fragmento aislado que se ejecuta en MARS antes y después; los casos en que no debe aplicar (etiqueta en medio, `j` a una etiqueta que no es la siguiente, `addiu` distinto de 0); y todos los programas de la suite dan la misma salida en MARS con y sin mirilla. En código real se disparan sobre todo R6 (`switch`, `if`, `break`) y R3 (`x + 0`), porque el generador ya evita la mayoría de los otros patrones.
+
+## 17. Integración y GUI
+
+`compiler_service.compile_source(source)` encadena frontend → semántica → `prepare` → `ExtendedTacGenerator` → `ExtendedMipsBackend` → `PeepholeOptimizer` y devuelve `asm_text` (final), `asm_unoptimized` y `peephole` además de lo anterior. Con cualquier error léxico, sintáctico o semántico no se genera ni TAC ni ensamblador. Si el backend rechazara el IR (un contrato roto entre etapas), se informa como `CPS-900` y tampoco hay código.
+
+La pestaña **MIPS** del IDE muestra `asm_text`, el resumen de la mirilla y permite copiarlo o descargarlo como `.asm`: es exactamente el texto que se ensambla en MARS (`java -jar tools/Mars4_5.jar nc programa.asm`, o *Assemble* + *Go* en la interfaz de MARS). Con errores el panel se vacía y muestra "No generado por errores".

@@ -1,22 +1,30 @@
-# Compiscript — Analizador Semántico
+# Compiscript — Compilador a MIPS
 
 Proyecto de Construcción de Compiladores: compilador de Compiscript (subconjunto de
-TypeScript) en Python 3 + ANTLR4, hasta la generación de **código intermedio (TAC)**.
+TypeScript) en Python 3 + ANTLR4, desde el código fuente hasta **ensamblador MIPS32**
+ejecutable en el simulador **MARS 4.5**, pasando por el **código intermedio (TAC)**.
 
 Este README documenta el pipeline completo: el frontend (parser, AST, tipos, tabla de
 símbolos), la semántica core (expresiones, funciones, control de flujo), la semántica
-extendida (clases, arreglos), el modelo de runtime y la generación de TAC (core y
-extendido), la visualización del AST y el IDE. Para una vista de conjunto de cómo encajan
-entre sí, ver `ARCHITECTURE.md`; la especificación del lenguaje intermedio está en
-`docs/INTERMEDIATE_CODE.md`.
+extendida (clases, arreglos), el modelo de runtime, la generación de TAC (core y
+extendido), el backend MIPS (base, core, extendido y optimización por mirilla), la
+visualización del AST y el IDE. Para una vista de conjunto de cómo encajan entre sí, ver
+`ARCHITECTURE.md`; la especificación del lenguaje intermedio está en
+`docs/INTERMEDIATE_CODE.md` y la del backend (ABI, registros, frames, runtime) en
+`docs/BACKEND_MIPS.md`.
 
 **Fuera de alcance, a propósito:** el compilador no interpreta ni ejecuta Compiscript ni
-el TAC, no genera assembler ni código objeto, y el lexer/parser siempre los genera ANTLR.
+el TAC (el `.asm` se ejecuta afuera, en MARS), no genera código objeto, el ensamblador
+sale **siempre** del TAC (nunca del AST) y el lexer/parser siempre los genera ANTLR.
 
 ## Requisitos
 
 - Python 3.11+ (se usa `StrEnum`, requiere 3.11 como mínimo)
-- Java 11+ (para regenerar el parser con ANTLR; no hace falta si solo vas a correr tests)
+- Java 11+: para ejecutar el ensamblador en MARS (lo usan los tests del backend) y para
+  regenerar el parser con ANTLR. En macOS: `brew install openjdk` y después
+  `sudo ln -sfn /opt/homebrew/opt/openjdk/libexec/openjdk.jdk /Library/Java/JavaVirtualMachines/openjdk.jdk`
+- MARS 4.5: `./tools/fetch_mars.sh` (Linux/macOS) o `tools/fetch_mars.ps1` (Windows) lo
+  descarga a `tools/Mars4_5.jar` y verifica su SHA-256. No se versiona.
 - Docker (opcional, fallback si no hay Java local)
 
 ## Instalación
@@ -469,7 +477,8 @@ por separado fuera de este módulo (DIP).
 
 ```
 source -> frontend -> semántica core -> semántica extendida
-       -> runtime_layout.prepare -> ExtendedTacGenerator -> serialize
+       -> runtime_layout.prepare -> ExtendedTacGenerator -> serialize        (tac_text)
+       -> ExtendedMipsBackend (asm sin optimizar) -> PeepholeOptimizer    (asm_text)
        (+ ast_visualizer para el SVG)
 ```
 
@@ -477,7 +486,8 @@ source -> frontend -> semántica core -> semántica extendida
 from compiler.compiler_service import compile_source
 
 result = compile_source(source)
-# -> CompilationResult(success, diagnostics, ast_svg, tac_text, symbols)
+# -> CompilationResult(success, diagnostics, ast_svg, tac_text, symbols,
+#                      asm_text, asm_unoptimized, peephole)
 ```
 
 - `success`: `True` si hubo AST (sin error de sintaxis) y cero diagnósticos de error en
@@ -490,12 +500,21 @@ result = compile_source(source)
   un `IRProgram` construido sobre un programa inválido.
 - `symbols`: la tabla de símbolos completa. Cuando hubo TAC, además trae la información
   de runtime que agregó `prepare` (slots, etiquetas, registros de activación, layouts).
+- `asm_text`: el ensamblador MIPS final (después de la mirilla), el mismo texto que la GUI
+  muestra, copia y descarga. `None` en los mismos casos que `tac_text`.
+- `asm_unoptimized`: el ensamblador antes de la mirilla (uso interno: los tests comparan
+  en MARS que ambos se comporten igual).
+- `peephole`: `PeepholeReport` con cuántas veces se aplicó cada regla R1–R6 y cuántas
+  instrucciones había antes y después.
+- Si el backend rechazara el IR (un contrato roto entre etapas, es decir un bug del
+  compilador y no del programa), no hay generación parcial: se informa como diagnóstico
+  `CPS-900` y `tac_text`/`asm_text` quedan en `None`.
 
 ## IDE
 
 Interfaz web mínima (Flask, una sola pantalla) para cargar un archivo `.cps` o pegar
-código Compiscript, compilarlo y ver diagnósticos, el AST como SVG, la tabla de símbolos y
-el **código intermedio (TAC)**, todo dentro de la página. El editor tiene
+código Compiscript, compilarlo y ver diagnósticos, el AST como SVG, la tabla de símbolos,
+el **código intermedio (TAC)** y el **ensamblador MIPS**, todo dentro de la página. El editor tiene
 resaltado léxico local, números de línea y navegación desde cada diagnóstico; esos
 colores no sustituyen al análisis semántico del compilador. El selector valida la
 extensión y el límite de 5 MiB antes de leer localmente el archivo; cargarlo no lo
@@ -514,8 +533,8 @@ python -m ide.app
 
 Abrir `http://127.0.0.1:5000/` en el navegador. El textarea trae un ejemplo mínimo;
 “Abrir archivo .cps” carga una fuente local y “Compilar” hace `POST /api/compile` con `{"source": "..."}` y pinta la respuesta
-(`{success, diagnostics[], ast_svg, tac_text, symbols, error}`) en los paneles de
-diagnósticos, AST, símbolos y TAC.
+(`{success, diagnostics[], ast_svg, tac_text, symbols, asm_text, peephole, error}`) en los
+paneles de diagnósticos, AST, símbolos, TAC y MIPS.
 
 - `Ctrl+Enter` (o `Cmd+Enter`) compila sin usar el ratón.
 - Los filtros separan errores y advertencias; “Copiar diagnósticos” conserva código,
@@ -527,6 +546,12 @@ diagnósticos, AST, símbolos y TAC.
   resaltadas, y permite copiarlo o descargarlo como `.tac`. Si la compilación tiene
   cualquier error, el panel se vacía y muestra **"No generado por errores"**: nunca queda
   visible el TAC de una compilación anterior.
+- La pestaña **MIPS** muestra el ensamblador final (secciones, etiquetas y datos
+  resaltados) y el resumen de la optimización por mirilla (`mirilla: 65 -> 64
+  instrucciones (R3x2, R6x1)`). “Copiar MIPS” y “.asm” copian/descargan **exactamente** el
+  texto mostrado (el `.asm` toma el nombre del `.cps` abierto), listo para abrir en MARS.
+  Con cualquier error el panel se vacía y muestra **"No generado por errores"**, igual
+  que el TAC.
 - La pestaña **Símbolos** muestra, junto a cada símbolo, su información de runtime
   (`global[0]`, `fn::A.m frame=2 slot=0`, `fields=1 metodos=1`, …).
 
@@ -535,7 +560,7 @@ diagnósticos, AST, símbolos y TAC.
 ```
 ide/
   app.py                 # rutas: GET / , POST /api/compile
-  templates/index.html   # una sola pantalla: editor + diagnosticos + ast / simbolos / tac
+  templates/index.html   # una sola pantalla: editor + diagnosticos + ast / simbolos / tac / mips
   static/style.css
   static/app.js           # fetch a /api/compile, sin logica semantica ni de ir
 ```
@@ -756,26 +781,104 @@ pytest tests/person2_mips -v     # contrato, expresiones, control, funciones, re
 uno trae al lado su salida esperada (`.out`), y `test_fixtures.py` los ensambla y
 ejecuta en MARS.
 
+## Generación de MIPS extendido y mirilla (Proyecto 03, Persona 3)
+
+Completa el backend con arreglos, `foreach`, clases y objetos, herencia con despacho
+dinámico y `try`/`catch`, agrega la optimización por mirilla y conecta todo a
+`compile_source` y a la GUI. Igual que el core, consume **solo** el `IRProgram`. La
+referencia completa está en `docs/BACKEND_MIPS.md` §15–§16.
+
+```python
+from compiler.backend.mips.extended_backend import ExtendedMipsBackend
+from compiler.backend.mips.peephole import PeepholeOptimizer
+
+assembly = ExtendedMipsBackend.generate(program, layout)     # AssemblyProgram, todo el TAC
+optimized, report = PeepholeOptimizer.optimize(assembly)     # R1-R6 sobre ASM estructurado
+text = optimized.render()                                    # .asm para MARS
+```
+
+| TAC | MIPS |
+|---|---|
+| `NEW_ARR n` | `rt_alloc(4 + 4n)` y la longitud en la palabra 0; los elementos desde el offset 4 |
+| `ARR_GET`/`ARR_SET` | `rt_check_bounds` (null, índice < 0 o ≥ longitud) y `lw`/`sw` en `4 + 4·i`. Al inicializar un literal (índice constante sobre el arreglo recién creado) no hace falta el chequeo |
+| `LEN` | `rt_check_null` y la palabra 0 (lo usa `foreach`) |
+| `NEW_OBJ C` | `rt_alloc(4 + 4·campos)` y `vt_C` en la palabra 0; después el TAC ya trae los `SET_FIELD` de los inicializadores y el `CALL` al constructor |
+| `GET_FIELD`/`SET_FIELD` | `lw`/`sw` en `4 + 4·slot` (los heredados primero, del `ClassLayout`); `rt_check_null` salvo sobre `this` |
+| `CALL_METHOD` | vtable del receptor → entrada `method_slot` → `jalr`, con `this` como argumento implícito |
+| `TRY_BEGIN`/`TRY_END`/`CATCH` | manejadores léxicos: dentro del `try` cada chequeo de `$v1` salta al catch más interno; `CATCH` guarda el mensaje (`$v0`) en la variable |
+
+- **LSP.** Para cualquier programa core genera exactamente el mismo ensamblador que
+  `CoreMipsBackend` (`tests/person3_mips/test_lsp.py` lo compara en 21 programas).
+- **Vtables.** Una por clase instanciada, `vt_<Clase>: .word ...` en orden de
+  `method_slot`: un override reusa el slot del padre y un método heredado apunta a la
+  implementación del ancestro.
+- **Errores de runtime.** Índice fuera de rango, acceso a `null` y división entre cero
+  siguen la convención del ABI (`$v1 = 1`, mensaje en `$v0`). Dentro de un `try` van al
+  catch; si no, suben por las llamadas hasta `main_error`, que imprime
+  `Error no capturado: <mensaje>` y termina el programa de forma controlada.
+- **Mirilla** (`peephole.py`), exactamente seis reglas distintas sobre instrucciones
+  estructuradas, sin cruzar etiquetas y repitiendo pasadas hasta el punto fijo:
+
+  | Regla | Patrón | Acción |
+  |---|---|---|
+  | R1 | `move r, r` | eliminar |
+  | R2 | `move r, s ; move r, s` (adyacentes) | eliminar la segunda |
+  | R3 | `addiu r, s, 0` | `move r, s` |
+  | R4 | `beq r, r, L` | `j L` |
+  | R5 | `bne r, r, L` | eliminar |
+  | R6 | `j L ; L:` | eliminar el `j` |
+
+  Cada regla se prueba en un fragmento aislado y en MARS; además, todos los programas de
+  la suite dan la misma salida antes y después de optimizar. En código real se disparan
+  sobre todo R6 (saltos a la etiqueta siguiente en `switch`/`if`) y R3 (`x + 0`): el
+  generador ya evita la mayoría de los otros patrones.
+
+```bash
+pytest tests/person3_mips -v     # contrato, LSP, arreglos, objetos, excepciones, mirilla, fixtures
+```
+
+`tests/fixtures/mips_extended/*.cps` son los programas de calificación de Persona 3, cada
+uno con su salida esperada en MARS (`.out`): `arreglos`, `matrices`, `foreach`,
+`clases_objetos`, `herencia`, `try_catch`, `error_no_capturado` y `mirilla`.
+
 ## Cómo ejecutar todo
 
 Desde un clon limpio:
 
 ```bash
 pip install -r requirements.txt     # antlr4 runtime, pytest, flask, graphviz
+./tools/fetch_mars.sh               # MARS 4.5 (Windows: tools/fetch_mars.ps1); necesita Java
 pytest tests -q                     # toda la suite, desde la raiz del repositorio
 flask --app ide.app run             # GUI en http://127.0.0.1:5000/
 ```
 
+### Ejecutar el ensamblador en MARS
+
+En la GUI, compilar y en la pestaña **MIPS** usar “.asm” para descargar el archivo (o
+“Copiar MIPS”). Después:
+
+- **MARS por línea de comandos:** `java -jar tools/Mars4_5.jar nc programa.asm`
+  (`nc` quita el aviso de copyright; agregar un número, p. ej. `1000000`, limita los pasos).
+- **MARS con interfaz gráfica:** `java -jar tools/Mars4_5.jar`, *File → Open* el `.asm`,
+  *Run → Assemble* (F3) y *Run → Go* (F5). La salida aparece en *Run I/O*.
+
+Configuración usada (la de fábrica de MARS 4.5): *delayed branching* desactivado y la
+ejecución empieza en la primera instrucción de `.text` (por eso `main` va primero). El
+programa termina con la syscall 10; un error de runtime no capturado imprime
+`Error no capturado: <mensaje>` y termina igual, sin excepción de MARS.
+
 Regenerar el parser es opcional (la salida de ANTLR está versionada); ver "Regenerar
 ANTLR" más arriba.
 
-En la GUI: **Abrir archivo .cps** (por ejemplo `tests/grading/fixtures/valid_tac_complete.cps`),
-**Compilar**, y revisar las pestañas AST, Símbolos y TAC. Para el diagrama del AST hace
+En la GUI: **Abrir archivo .cps** (por ejemplo `tests/fixtures/mips_extended/herencia.cps`
+o `tests/grading/fixtures/valid_tac_complete.cps`), **Compilar**, y revisar las pestañas
+AST, Símbolos, TAC y MIPS. Para el diagrama del AST hace
 falta el binario `dot` de Graphviz en el `PATH`; sin él, todo lo demás funciona igual.
 
 `pytest tests -q` corre en un solo comando los tests de todas las etapas: frontend,
-semántica core y extendida, IR y runtime, TAC core y extendido, integración y los
-fixtures de calificación.
+semántica core y extendida, IR y runtime, TAC core y extendido, backend MIPS (base, core
+y extendido, ejecutando en MARS), integración y los fixtures de calificación. Los tests
+del backend **fallan** (no se saltan) si falta Java o `tools/Mars4_5.jar`.
 
 ## Fixtures para calificación
 
@@ -791,7 +894,26 @@ automatizadas y se pueden abrir directamente desde la GUI:
 | `syntax_recovery.cps` | dos errores sintácticos recuperados; no genera TAC |
 
 `tests/integration/test_rubric_e2e.py` tiene una prueba por cada fila de la rúbrica de
-25 puntos que entra por `POST /api/compile`, igual que la GUI.
+25 puntos (código intermedio) que entra por `POST /api/compile`, igual que la GUI.
+`tests/integration/test_rubric_mips_e2e.py` hace lo mismo con las 14 filas de la rúbrica
+de 30 puntos (ensamblador): toma el `.asm` que mostraría la GUI y lo ejecuta en MARS.
+
+| Rubro (30 pts) | Pts | Evidencia ejecutable |
+|---|---|---|
+| Selección de registros | 4 | `tests/mips_base/test_registers.py`, `person2_mips/test_registers.py`, e2e con spill de 10 valores vivos |
+| Registros y árboles de activación | 5 | `mips_base/test_frames.py`, `person2_mips/test_activation_tree.py`, `docs/ACTIVATION_TESTS.md` |
+| Variables y constantes | 1 | `fixtures/mips_core/variables_constantes`, e2e |
+| Aritmética | 1 | `person2_mips/test_expressions_mars.py`, `fixtures/mips_core/aritmetica` |
+| Lógica | 1 | `fixtures/mips_core/logica`, e2e con cortocircuito |
+| Arreglos | 1 | `person3_mips/test_arrays_mars.py`, `fixtures/mips_extended/arreglos`, `matrices` |
+| Sentencias de control | 3 | `person2_mips/test_control_mars.py`, `fixtures/mips_extended/foreach`, e2e |
+| Funciones y parámetros | 2 | `person2_mips/test_functions_mars.py`, `fixtures/mips_core/funciones` |
+| Recursividad | 2 | `fixtures/mips_core/recursion`, árbol de activación |
+| Clases y objetos | 2 | `person3_mips/test_objects_mars.py`, `fixtures/mips_extended/clases_objetos` |
+| Herencia | 2 | `person3_mips/test_objects_mars.py`, `fixtures/mips_extended/herencia` |
+| try/catch | 2 | `person3_mips/test_exceptions_mars.py`, `fixtures/mips_extended/try_catch`, `error_no_capturado` |
+| Mirilla (≥ 6) | 3 | `person3_mips/test_peephole.py` (R1–R6 + equivalencia en MARS), `fixtures/mips_extended/mirilla` |
+| Simulador compatible | 1 | MARS 4.5 por CLI en toda la suite; instrucciones arriba |
 
 ## Pendientes de confirmación docente
 
