@@ -194,3 +194,92 @@ Las del IR no son válidas en MIPS (`::` no se acepta y `#` abre comentario). `m
 | Inicialización | — | el IR no inicializa: locales en cero en el prólogo, globales por `.space`, campos por `rt_alloc` |
 | `getReg` | API base | + `instruction()` para fijar registros por instrucción |
 | `CompilationResult` | con `asm_text` | todavía `(success, diagnostics, ast_svg, tac_text, symbols)`; lo extiende la integración |
+
+## 14. Backend core: TAC → MIPS
+
+`CoreMipsBackend.generate(ir_program, runtime_layout)` devuelve un `AssemblyProgram`, y `.render()` da el texto `.asm`. Lee **solo** el IR estructurado (`IRProgram`/`TACInstruction`): no ve el AST ni reparsea el texto del TAC. Si recibe otra cosa (un AST, un string) lanza `IRContractError`.
+
+Cada familia de opcodes tiene su módulo, igual que en el generador de TAC:
+
+| Módulo | Opcodes |
+|---|---|
+| `expression_lowering.py` | `MOV`, `BIN`, `UN`, `PRINT` |
+| `control_lowering.py` | `LABEL`, `GOTO`, `IF_TRUE`, `IF_FALSE` |
+| `function_lowering.py` | `FUNC_BEGIN`, `FUNC_END`, `ARG`, `CALL`, `RETURN` |
+| `core_backend.py` | compone los anteriores, valida el IR, despacha y arma el programa |
+| `liveness.py` | análisis de vida de temporales por unidad |
+| `runtime_helpers.py` | cuerpos de los helpers `rt_*` (`RuntimeLibrary`) |
+
+**Despacho y validación.** El handler de un opcode es el método `lower_<opcode>` (`MOV` → `lower_mov`). Antes de emitir nada, `validate()` revisa todo el programa:
+
+- cada opcode tiene que tener handler;
+- el código global no puede tener `FUNC_BEGIN`/`FUNC_END`;
+- cada función abre con su `FUNC_BEGIN` y cierra con su `FUNC_END`.
+
+Si algo falla, lanza un solo `IRContractError` con la lista completa de problemas, y no hay ensamblador a medias. El core no tiene handler para `NEW_ARR`, `ARR_GET`, `ARR_SET`, `LEN`, `NEW_OBJ`, `GET_FIELD`, `SET_FIELD`, `CALL_METHOD`, `TRY_BEGIN`, `TRY_END` ni `CATCH`: un programa con clases o arreglos se rechaza listándolos.
+
+### Traducción
+
+| TAC | MIPS |
+|---|---|
+| `MOV d, a` | `lw`/`li`/`la`/`move` al registro del destino; a una variable, `sw` (`store_storage`) |
+| `BIN +, -` | `addu`/`subu`; con una constante de 16 bits, `addiu` (sin trap: 32 bits que dan la vuelta) |
+| `BIN *` | `mul` (los 32 bits bajos) |
+| `BIN /, %` | `rt_check_divisor` y después `div`/`rem` (truncan hacia cero). No se chequea si el divisor es una constante distinta de 0 |
+| `BIN == != < <= > >=` | `seq`/`sne`/`slt`/`sle`/`sgt`/`sge` → 0/1 |
+| `BIN +` con un `string` | el lado que no es string se convierte dentro del temporal resultado (`rt_int_to_string`, o `movz` entre `"true"`/`"false"`) y después `rt_concat` |
+| `BIN ==`/`!=` entre dos `string` | `rt_string_equals` (compara el contenido; `!=` agrega `xori 1`) |
+| `UN -`, `UN !` | `subu d, $zero, a`; `xori d, a, 1` |
+| `PRINT` | integer con syscall 1; string con syscall 4 (`movz` cambia null por `"null"`); boolean como `true`/`false`; null como `null`; objeto o arreglo como `<Tipo>` o `null` (`print_reference`). Después, un `\n` (syscall 11) |
+| `LABEL`/`GOTO` | `mark_label` / `j` (el allocator se sincroniza en cada límite de bloque) |
+| `IF_TRUE`/`IF_FALSE` | `bnez`/`beqz`. Si la condición es una constante, se decide al compilar: o `j`, o nada |
+| `FUNC_BEGIN`/`FUNC_END` | `begin_function`/`end_function` (§4) |
+| `ARG`/`CALL`/`RETURN` | `emit_arg`/`emit_call` (+ chequeo de `$v1`)/`emit_return` (§5) |
+
+**Strings.** El TAC nunca reusa el temporal de un operando como resultado del mismo `BIN`, porque pide el resultado antes de liberar los operandos. Por eso convertir el operando que no es string dentro del resultado es seguro y no hace falta otra casilla del frame.
+
+**Selección de registros con análisis de vida.** `dead_temps(unidad)` construye el grafo de flujo de la unidad:
+
+- los bloques empiezan en `LABEL` o después de un salto;
+- hay aristas por `GOTO`, `IF_*`, caída al siguiente bloque y `TRY_BEGIN` → manejador.
+
+Después resuelve las ecuaciones de vida hasta el punto fijo. Al terminar cada instrucción, el backend hace `release` de los temporales que mueren ahí. Así un temporal muerto no se vuelve a guardar en su home en la siguiente etiqueta, salto o llamada. En un `IF_*`, la condición se libera antes del `flush` del salto. Hay tres casos conservadores:
+
+- un opcode desconocido trata su `result` como lectura;
+- en `ARR_SET`/`SET_FIELD`, el `result` se lee;
+- en una unidad con `try`, lo que está vivo al entrar a un manejador no muere en ningún punto.
+
+### Errores de runtime
+
+`error_target()` dice a dónde saltar si `$v1 = 1`. En el core es la salida de la función (el error sube tal cual) o `main_error` en el código global, que llama a `rt_uncaught_error`. Este imprime `Error no capturado: <mensaje>` y termina. El mensaje de la división por cero es `division entre cero`.
+
+### Helpers implementados
+
+`RuntimeLibrary` emite **solo** los helpers que el programa usó, en el orden del catálogo `CORE_RUNTIME`. Todos son rutinas hoja: no arman frame y piden memoria con la syscall 9.
+
+| Helper | Implementado en |
+|---|---|
+| `rt_alloc`, `rt_check_divisor`, `rt_int_to_string`, `rt_concat`, `rt_string_equals`, `rt_uncaught_error` | core (`CORE_RUNTIME`) |
+| `rt_check_null`, `rt_check_bounds` | backend extendido |
+| `rt_print_boolean` | no hace falta: `PRINT` elige el texto con `movz`, sin llamada |
+
+- `rt_concat` y `rt_string_equals` toman un string `null` como el texto `"null"`.
+- `rt_int_to_string` trabaja con el valor en negativo, así que también convierte `-2147483648`.
+
+### Cómo se extiende (backend extendido)
+
+`ExtendedMipsBackend(CoreMipsBackend)` no edita el core:
+
+- agrega los handlers `lower_new_arr`, `lower_arr_get`, …, `lower_try_begin`, `lower_catch`;
+- sobrescribe `error_target()` para devolver la etiqueta del catch activo (y llamar al original fuera de un `try`);
+- define `RUNTIME = {**CORE_RUNTIME, "rt_check_null": ..., "rt_check_bounds": ...}`;
+- si hace falta, sobrescribe `print_reference`.
+
+Los programas core tienen que generar el mismo ensamblador con los dos backends (LSP).
+
+### Instrucciones agregadas a `SIGNATURES`
+
+| Instrucción | Para qué |
+|---|---|
+| `addu`, `subu`, `addiu` | aritmética de 32 bits sin trap por overflow |
+| `movz`, `movn` | elegir un valor sin saltar, para no cortar los bloques del allocator |

@@ -723,6 +723,39 @@ pytest tests/integration/test_rubric_e2e.py -v   # una prueba por fila de la rú
   `test_inheritance.py`, `test_exceptions.py` y `test_temps.py`. Contrato en `test_api.py`,
   sustitución en `test_lsp.py` y reglas de capas en `test_architecture.py`.
 
+## Generación de MIPS core (Proyecto 03, Persona 2)
+
+Traduce a ensamblador MIPS32 para MARS 4.5 el TAC del subconjunto core: variables y
+constantes, aritmética, lógica, strings, `print`, control de flujo, funciones,
+recursión y funciones anidadas. Consume **solo** el IR estructurado (`IRProgram`): nunca
+el AST ni el texto del TAC. Se apoya en la base del backend (Persona 1): builder, frames,
+registros y llamadas. La referencia completa está en `docs/BACKEND_MIPS.md` §14, y la
+evidencia de registros y árboles de activación en `docs/ACTIVATION_TESTS.md`.
+
+```python
+from compiler.backend.mips.core_backend import CoreMipsBackend
+
+program = ExtendedTacGenerator.generate(semantic_result, layout)   # IRProgram (TAC)
+asm = CoreMipsBackend.generate(program, layout).render()            # texto .asm para MARS
+```
+
+- Un opcode sin lowering (arreglos, objetos, `try`/`catch` en el backend core) rechaza el
+  programa entero con `IRContractError` antes de emitir nada.
+- Ejecutar el `.asm` en MARS: `java -jar tools/Mars4_5.jar nc programa.asm`. El jar se
+  descarga con `tools/fetch_mars.sh` o `tools/fetch_mars.ps1`. MARS corre con Java 8 o
+  superior.
+- `integer` es aritmética de 32 bits en complemento a dos: desborda dando la vuelta, sin
+  abortar. `/` y `%` truncan hacia cero, y la división por cero es un error de runtime
+  (`Error no capturado: division entre cero`) que sube por las llamadas hasta `main`.
+
+```bash
+pytest tests/person2_mips -v     # contrato, expresiones, control, funciones, registros, árbol de activación
+```
+
+`tests/fixtures/mips_core/*.cps` son programas de calificación, uno por rubro core. Cada
+uno trae al lado su salida esperada (`.out`), y `test_fixtures.py` los ensambla y
+ejecuta en MARS.
+
 ## Cómo ejecutar todo
 
 Desde un clon limpio:
