@@ -1,4 +1,4 @@
-# Arquitectura del compilador Compiscript (analisis semantico + codigo intermedio)
+# Arquitectura del compilador Compiscript (analisis semantico, codigo intermedio y MIPS)
 
 ## Flujo de compilacion
 
@@ -7,7 +7,9 @@ El punto de entrada para clientes es `compiler.compiler_service.compile_source`:
 ```
 source -> frontend -> core_semantics <-> extended_semantics          (analisis)
        -> runtime_layout.prepare -> ExtendedTacGenerator -> serialize  (codigo intermedio)
-       -> CompilationResult(success, diagnostics, ast_svg, tac_text, symbols) -> IDE
+       -> ExtendedMipsBackend -> PeepholeOptimizer -> render           (ensamblador MIPS)
+       -> CompilationResult(success, diagnostics, ast_svg, tac_text, symbols,
+                            asm_text, asm_unoptimized, peephole) -> IDE
 ```
 
 1. **Frontend.** `frontend.analyze_source` ejecuta ANTLR, construye el AST propio y
@@ -26,7 +28,10 @@ source -> frontend -> core_semantics <-> extended_semantics          (analisis)
 5. **Codigo intermedio.** `ExtendedTacGenerator.generate` recorre el AST ya validado y
    emite `TACInstruction` estructuradas a traves de `IRBuilder`; `serialize` produce el
    texto que muestra la GUI.
-6. **Integracion.** `compiler_service` compone las etapas y pide el SVG a Graphviz.
+6. **Ensamblador.** `ExtendedMipsBackend.generate` recorre el `IRProgram` (nunca el
+   AST ni el texto TAC) y produce un `AssemblyProgram` estructurado para MARS 4.5;
+   `PeepholeOptimizer` le aplica las reglas R1-R6 y `render` da el texto `.asm`.
+7. **Integracion.** `compiler_service` compone las etapas y pide el SVG a Graphviz.
    Si `dot` no esta disponible, la compilacion conserva sus diagnosticos y el SVG es
    `None`.
 
@@ -35,7 +40,8 @@ Las fachadas mantienen sus contratos: `FrontendResult`, `CoreSemanticResult`,
 `CompilationResult` no reconstruyen el AST ni la tabla de simbolos entre etapas.
 
 **Invariante de seguridad.** Con cualquier error lexico, sintactico o semantico no se
-genera IR: `compile_source` devuelve `tac_text=None` sin llamar a `prepare`, `prepare`
+genera IR ni ensamblador: `compile_source` devuelve `tac_text=None` y `asm_text=None` sin
+llamar a `prepare`, `prepare`
 rechaza un resultado con errores (`ValueError`) y `IRBuilder` solo se construye con un
 `RuntimeLayout`. Las advertencias no bloquean.
 
@@ -93,6 +99,7 @@ columna y codigo. Los rangos son:
 | `CPS-0xx` | Frontend | sintaxis, scopes, simbolos, herencia |
 | `CPS-1xx` | Semantica core | asignaciones, operadores, llamadas, retornos |
 | `CPS-2xx` | Semantica extendida | miembros, arreglos, constructores |
+| `CPS-900` | Integracion | el backend rechazo el IR (bug del compilador, no del programa) |
 
 `CPS-214` indica un literal de arreglo vacio sin tipo de contexto. `CPS-102` se reutiliza
 para cualquier reasignacion de constante, incluidos atributos `const`.
@@ -136,6 +143,43 @@ ExtendedTacGenerator(ArrayLowering, ObjectLowering, ExceptionLowering, CoreTacGe
   pide antes de liberar operandos. `foreach` mantiene vivos arreglo, indice y longitud
   durante el cuerpo. El pico por funcion queda en `FUNC_END temps=k`.
 
+## Backend MIPS
+
+La referencia completa (ABI, registros, frames, static links, layout de datos, helpers de
+runtime, traduccion de cada opcode y mirilla) esta en `docs/BACKEND_MIPS.md`.
+
+| Modulo (`compiler/backend/mips/`) | Responsabilidad | Persona |
+|---|---|---|
+| `model.py`, `operands.py`, `builder.py` | ASM estructurado: instrucciones validadas por firma, etiquetas, `.data`/`.text`, render determinista | 1 |
+| `abi.py`, `frame_planner.py`, `activation.py` | convencion de llamada unica, offsets del frame, prologo/epilogo, static link, llamadas | 1 |
+| `register_allocator.py`, `liveness.py` | `getReg` sobre `$t0-$t7` con spill a homes; analisis de vida por unidad | 1 / 2 |
+| `helpers.py`, `runtime_helpers.py` | contrato y cuerpos de los helpers `rt_*` (heap, strings, chequeos) | 1 / 2 / 3 |
+| `core_backend.py` + 3 mixins | MOV/BIN/UN/PRINT, control, funciones: validacion y despacho por opcode | 2 |
+| `extended_backend.py` + 3 mixins | arreglos, objetos/vtables/despacho, try/catch | 3 |
+| `peephole.py` | optimizacion por mirilla R1-R6 sobre el ASM estructurado | 3 |
+
+```
+CoreMipsBackend(ExpressionLowering, ControlLowering, FunctionLowering)
+ExtendedMipsBackend(ArrayLowering, ObjectLowering, ExceptionLowering, CoreMipsBackend)
+```
+
+- **Solo TAC.** Los backends reciben `(IRProgram, RuntimeLayout)`; un test de arquitectura
+  prohibe importar el AST, ANTLR o la semantica desde `compiler/backend`. Si un opcode no
+  tiene handler, o el IR esta mal formado (`try` sin cerrar, `NEW_ARR` sin longitud
+  constante, `NEW_OBJ` sin layout), se rechaza el programa entero antes de emitir nada.
+- **LSP.** El backend extendido solo agrega handlers, un catalogo de runtime mas grande
+  y el destino de los errores dentro de un `try`: para programas core produce el mismo
+  ensamblador que el core.
+- **Un solo ABI.** Funciones, metodos, constructores y helpers usan la misma convencion
+  (argumentos en pila, `$v0` valor, `$v1` estado de error). Por eso `try`/`catch` no
+  necesita nada en tiempo de ejecucion: los manejadores son lexicos y solo cambian a donde
+  salta cada chequeo de `$v1`.
+- **Herencia sin recalcular.** Offsets de campos, tamaño de objeto y orden de las
+  vtables salen del `ClassLayout` ya aplanado por `runtime_layout`.
+- **Mirilla acotada.** Ventanas de una o dos instrucciones adyacentes, sin cruzar
+  etiquetas, saltos ni llamadas; R6 solo quita un `j` cuyo destino es la etiqueta
+  inmediatamente siguiente. Se verifica en MARS que la salida no cambia.
+
 ## IDE
 
 El IDE Flask solo delega en `compile_source`. El cliente construye diagnosticos con
@@ -143,7 +187,7 @@ El IDE Flask solo delega en `compile_source`. El cliente construye diagnosticos 
 El editor conserva un `textarea` como fuente de verdad y una capa visual sincronizada
 de resaltado léxico y números de línea. Esta capa solo reconoce tokens de la gramática:
 no consulta símbolos ni decide validez semántica. Todas las respuestas de la API incluyen
-`success`, `diagnostics`, `ast_svg`, `tac_text`, `symbols` y `error`. El limite HTTP se aplica antes de
+`success`, `diagnostics`, `ast_svg`, `tac_text`, `symbols`, `asm_text`, `peephole` y `error`. El limite HTTP se aplica antes de
 deserializar JSON, y el compilador conserva su limite de fuente como segunda defensa.
 El selector `.cps` lee localmente con `FileReader`, valida extensión y tamaño con el
 mismo límite del compilador y solo envía el texto al servidor cuando el usuario pulsa
@@ -156,13 +200,17 @@ panel se vacia y muestra "No generado por errores": nunca queda visible el TAC d
 compilacion anterior. La pestaña de simbolos muestra la informacion de runtime que
 `prepare` escribio en la tabla (slots, etiquetas, frames, layouts).
 
+La pestaña MIPS sigue el mismo criterio: muestra `asm_text` por `textContent`, el
+resumen de la mirilla, y "Copiar MIPS" / ".asm" usan exactamente ese texto. Sin
+ensamblador (errores o fallo de red) se vacia y muestra "No generado por errores".
+
 ## Limites intencionales
 
-Se sigue KISS/YAGNI: no hay float, optimizador, interprete, debugger, persistencia,
-autenticacion, autocompletado, rate limiting, CFG ni analisis de flujo avanzado. El TAC
-no se ejecuta, no se traduce a assembler y no se genera codigo objeto; no hay SSA,
-constant folding ni eliminacion de codigo muerto: el unico manejo de recursos es el
-reciclaje de temporales.
+Se sigue KISS/YAGNI: no hay float, interprete, debugger, persistencia, autenticacion,
+autocompletado, rate limiting ni optimizador global. El TAC no se ejecuta: se traduce a
+ensamblador MIPS que se ejecuta afuera, en MARS; no se genera codigo objeto. No hay SSA,
+constant folding ni eliminacion de codigo muerto en el TAC; el backend solo hace analisis
+de vida de temporales (para liberar registros) y la mirilla de seis reglas.
 
 ## Pendientes docentes
 

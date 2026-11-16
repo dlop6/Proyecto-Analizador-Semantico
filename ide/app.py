@@ -1,6 +1,7 @@
 """
 ide minimo (flask, una sola pantalla): pega o carga codigo compiscript, lo compila,
-muestra diagnosticos, el ast como svg, la tabla de simbolos y el codigo intermedio (tac). sin autenticacion, sin
+muestra diagnosticos, el ast como svg, la tabla de simbolos, el codigo intermedio (tac) y el
+ensamblador mips (con lo que hizo la optimizacion por mirilla). sin autenticacion, sin
 persistencia, sin autocompletado, sin debugger -- alcance exacto que pide el pdf
 para la etapa de integracion.
 
@@ -104,10 +105,22 @@ def _serialize_symbol_table(table: SymbolTable) -> dict:
     return _serialize_scope(table.global_scope)
 
 
+def _serialize_peephole(report) -> dict | None:
+    """lo que hizo la mirilla, para mostrarlo junto al ensamblador (presentacion pura)."""
+    if report is None:
+        return None
+    return {
+        "summary": report.summary(),
+        "before": report.before,
+        "after": report.after,
+        "applied": dict(report.applied),
+    }
+
+
 def _error_response(message: str, status: int):
     return jsonify({
         "success": False, "diagnostics": [], "ast_svg": None, "tac_text": None, "symbols": None,
-        "error": message,
+        "asm_text": None, "peephole": None, "error": message,
     }), status
 
 
@@ -149,6 +162,8 @@ def api_compile():
         "symbols": _serialize_symbol_table(result.symbols),
         "ast_svg": result.ast_svg,
         "tac_text": result.tac_text,
+        "asm_text": result.asm_text,
+        "peephole": _serialize_peephole(result.peephole),
         "error": None,
     })
 

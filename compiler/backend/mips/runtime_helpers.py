@@ -12,7 +12,8 @@ reglas de los cuerpos:
 
 solo se emiten los helpers que el programa usa (RuntimeLibrary.require), en el orden del
 catalogo, para que el ensamblador sea chico y determinista. el backend extendido agrega sus
-helpers (null, limites) pasando un catalogo mas grande: no se edita este.
+helpers (null, limites) en EXTENDED_RUNTIME, un catalogo mas grande que deja CORE_RUNTIME
+intacto.
 """
 from __future__ import annotations
 
@@ -212,6 +213,57 @@ CORE_RUNTIME: Mapping[str, HelperBody] = MappingProxyType({
     "rt_concat": emit_concat,
     "rt_string_equals": emit_string_equals,
     "rt_uncaught_error": emit_uncaught_error,
+})
+
+
+# ----------------------------------------------------------------------
+# helpers del backend extendido (persona 3): chequeos de null y de limites
+# ----------------------------------------------------------------------
+
+NULL_ACCESS = "acceso a null"
+INDEX_OUT_OF_RANGE = "indice fuera de rango"
+
+
+def emit_check_null(b: MipsBuilder) -> None:
+    """rt_check_null(p): falla con NULL_ACCESS si p == 0 (objeto o arreglo sin crear)."""
+    b.mark("rt_check_null")
+    _arg(b, 0, T[0])
+    b.emit_branch("beqz", T[0], LabelRef("rt_check_null_fail"))
+    b.emit("li", V0, Imm(0))
+    _return(b)
+    b.mark("rt_check_null_fail")
+    b.emit("la", V0, LabelRef(b.add_string(NULL_ACCESS)))
+    _return(b, STATUS_ERROR)
+
+
+def emit_check_bounds(b: MipsBuilder) -> None:
+    """
+    rt_check_bounds(arreglo, indice): falla si el arreglo es null (NULL_ACCESS) o si el
+    indice no cumple 0 <= indice < longitud (INDEX_OUT_OF_RANGE). la longitud es la palabra 0.
+    """
+    array, index, length = T[0], T[1], T[2]
+    b.mark("rt_check_bounds")
+    _arg(b, 0, array)
+    _arg(b, 1, index)
+    b.emit_branch("beqz", array, LabelRef("rt_check_bounds_null"))
+    b.emit("lw", length, Mem(0, array), comment="longitud")
+    b.emit_branch("blt", index, ZERO, LabelRef("rt_check_bounds_fail"))
+    b.emit_branch("bge", index, length, LabelRef("rt_check_bounds_fail"))
+    b.emit("li", V0, Imm(0))
+    _return(b)
+    b.mark("rt_check_bounds_fail")
+    b.emit("la", V0, LabelRef(b.add_string(INDEX_OUT_OF_RANGE)))
+    _return(b, STATUS_ERROR)
+    b.mark("rt_check_bounds_null")
+    b.emit("la", V0, LabelRef(b.add_string(NULL_ACCESS)))
+    _return(b, STATUS_ERROR)
+
+
+# catalogo del backend extendido: el core intacto (mismo orden, lsp) y los chequeos al final
+EXTENDED_RUNTIME: Mapping[str, HelperBody] = MappingProxyType({
+    **CORE_RUNTIME,
+    "rt_check_null": emit_check_null,
+    "rt_check_bounds": emit_check_bounds,
 })
 
 
