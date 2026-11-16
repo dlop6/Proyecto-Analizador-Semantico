@@ -22,6 +22,15 @@
   const tacCopyEl = document.getElementById("tac-copy");
   const tacDownloadEl = document.getElementById("tac-download");
   const tacStatusEl = document.getElementById("tac-status");
+  const asmEl = document.getElementById("asm-container");
+  const asmStateEl = document.getElementById("asm-state");
+  const asmPeepholeEl = document.getElementById("asm-peephole");
+  const asmOutputEl = document.getElementById("asm-output");
+  const asmCodeEl = document.getElementById("asm-code");
+  const asmControlsGroupEl = document.getElementById("asm-controls");
+  const asmCopyEl = document.getElementById("asm-copy");
+  const asmDownloadEl = document.getElementById("asm-download");
+  const asmStatusEl = document.getElementById("asm-status");
   const viewTabsEl = document.getElementById("view-tabs");
   const astControlsGroupEl = document.getElementById("ast-controls");
   const btnEl = document.getElementById("compile-btn");
@@ -57,11 +66,15 @@
   let astDimensions = null;
   let activeView = "ast";
   let currentTac = null;
+  let currentAsm = null;
 
   // Mensajes del panel TAC. Si la compilación tiene cualquier error el panel se vacía
   // y lo dice explícitamente: nunca queda visible el TAC de una compilación anterior.
   const TAC_NOT_GENERATED = "No generado por errores: corregí los diagnósticos y volvé a compilar.";
   const TAC_PENDING = "Compilá para generar el código intermedio.";
+  // Mismo criterio para el ensamblador: con errores no se muestra MIPS viejo.
+  const ASM_NOT_GENERATED = "No generado por errores: corregí los diagnósticos y volvé a compilar.";
+  const ASM_PENDING = "Compilá para generar el ensamblador MIPS.";
 
   function createTextNode(text, className) {
     if (!className) return document.createTextNode(text);
@@ -224,8 +237,10 @@
     astEl.hidden = view !== "ast";
     symbolsEl.hidden = view !== "symbols";
     tacEl.hidden = view !== "tac";
+    asmEl.hidden = view !== "asm";
     astControlsGroupEl.hidden = view !== "ast";
     tacControlsGroupEl.hidden = view !== "tac";
+    asmControlsGroupEl.hidden = view !== "asm";
     for (const button of viewTabsEl.querySelectorAll("button[data-view]")) {
       const active = button.dataset.view === view;
       button.classList.toggle("active", active);
@@ -245,6 +260,7 @@
     setAstEmpty("Compilá para generar el árbol.");
     renderSymbols(null);
     renderTac(null, TAC_PENDING);
+    renderAsm(null, null, ASM_PENDING);
   }
 
   // Clase visual de una línea del TAC: solo distingue la forma de la línea
@@ -283,6 +299,76 @@
     tacStateEl.textContent = currentTac
       ? `Código intermedio generado | ${formatCount(lineCount, "línea", "líneas")}`
       : "Código intermedio generado (programa vacío).";
+  }
+
+  // Clase visual de una línea del ensamblador: sección, etiqueta, dato o instrucción.
+  // Solo colorea; el texto llega ya renderizado por el backend y no se interpreta.
+  function asmLineClass(line) {
+    const trimmed = line.trim();
+    if (trimmed === ".data" || trimmed === ".text") return "asm-section";
+    if (/^[A-Za-z_][\w.]*:\s+\./.test(trimmed)) return "asm-data";
+    if (/^[A-Za-z_][\w.]*:$/.test(trimmed)) return "asm-label";
+    return "asm-instr";
+  }
+
+  // El ensamblador final (ya optimizado por mirilla) es exactamente el texto que se
+  // copia y se descarga. Sin ensamblador (errores, red o carga nueva) se limpia todo.
+  function renderAsm(asmText, peephole, emptyMessage) {
+    currentAsm = typeof asmText === "string" ? asmText : null;
+    asmStatusEl.textContent = "";
+    asmStatusEl.className = "utility-status";
+    asmCopyEl.disabled = currentAsm === null;
+    asmDownloadEl.disabled = currentAsm === null;
+    const summary = currentAsm !== null && peephole && typeof peephole.summary === "string"
+      ? peephole.summary : "";
+    asmPeepholeEl.textContent = summary ? `Optimización por ${summary}` : "";
+    asmPeepholeEl.hidden = !summary;
+    if (currentAsm === null) {
+      asmCodeEl.replaceChildren();
+      asmOutputEl.hidden = true;
+      asmStateEl.className = "hint";
+      asmStateEl.textContent = emptyMessage;
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    const lines = currentAsm.replace(/\n$/, "").split("\n");
+    lines.forEach((line, index) => {
+      fragment.appendChild(createTextNode(line, line.trim() ? asmLineClass(line) : "tac-blank"));
+      if (index < lines.length - 1) fragment.appendChild(document.createTextNode("\n"));
+    });
+    asmCodeEl.replaceChildren(fragment);
+    asmOutputEl.hidden = false;
+    asmStateEl.className = "hint ok";
+    const instructionCount = lines.filter((line) => asmLineClass(line) === "asm-instr" && line.trim()).length;
+    asmStateEl.textContent =
+      `Ensamblador MIPS generado (MARS 4.5) | ${formatCount(instructionCount, "instrucción", "instrucciones")}`;
+  }
+
+  async function copyAsm() {
+    if (currentAsm === null) return;
+    try {
+      await navigator.clipboard.writeText(currentAsm);
+      asmStatusEl.textContent = "MIPS copiado.";
+      asmStatusEl.className = "utility-status ok";
+    } catch (_error) {
+      asmStatusEl.textContent = "El navegador no permitió copiar el ensamblador.";
+      asmStatusEl.className = "utility-status fail";
+    }
+  }
+
+  function downloadText(text, fileName) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Nombre del .asm descargado: el del .cps abierto, o uno genérico.
+  function asmFileName() {
+    return loadedFileName ? loadedFileName.replace(/\.cps$/i, "") + ".asm" : "compiscript.asm";
   }
 
   async function copyTac() {
@@ -520,6 +606,7 @@
       setAstEmpty("No hay AST disponible para esta solicitud.");
       renderSymbols(null);
       renderTac(null, TAC_NOT_GENERATED);
+      renderAsm(null, null, ASM_NOT_GENERATED);
       return;
     }
     currentDiagnostics = Array.isArray(data.diagnostics) ? data.diagnostics : [];
@@ -536,6 +623,7 @@
     renderAstResult(data);
     renderSymbols(data.symbols);
     renderTac(data.success ? data.tac_text : null, TAC_NOT_GENERATED);
+    renderAsm(data.success ? data.asm_text : null, data.peephole, ASM_NOT_GENERATED);
   }
 
   function diagnosticsText() {
@@ -607,6 +695,7 @@
       setAstEmpty("No hay AST disponible mientras no haya una respuesta válida.");
       renderSymbols(null);
       renderTac(null, TAC_NOT_GENERATED);
+      renderAsm(null, null, ASM_NOT_GENERATED);
     } finally {
       compiling = false;
       btnEl.disabled = false;
@@ -659,13 +748,12 @@
   tacCopyEl.addEventListener("click", copyTac);
   tacDownloadEl.addEventListener("click", () => {
     if (currentTac === null) return;
-    const blob = new Blob([currentTac], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "compiscript.tac";
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadText(currentTac, "compiscript.tac");
+  });
+  asmCopyEl.addEventListener("click", copyAsm);
+  asmDownloadEl.addEventListener("click", () => {
+    if (currentAsm === null) return;
+    downloadText(currentAsm, asmFileName());
   });
   astDownloadEl.addEventListener("click", () => {
     if (!currentAstSvg) return;
