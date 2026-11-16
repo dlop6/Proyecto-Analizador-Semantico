@@ -244,7 +244,7 @@ def test_errores_http_tienen_esquema_uniforme():
     client = app.test_client()
     response = client.post("/api/compile", json={"source": 123})
     assert response.status_code == 400
-    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "tac_text", "symbols", "error"}
+    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "tac_text", "symbols", "asm_text", "peephole", "error"}
     assert response.get_json()["tac_text"] is None
 
 
@@ -253,7 +253,7 @@ def test_json_malformado_tiene_esquema_uniforme():
     client = app.test_client()
     response = client.post("/api/compile", data="{", content_type="application/json")
     assert response.status_code == 400
-    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "tac_text", "symbols", "error"}
+    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "tac_text", "symbols", "asm_text", "peephole", "error"}
     assert response.get_json()["tac_text"] is None
 
 
@@ -265,7 +265,7 @@ def test_request_demasiado_grande_se_rechaza_antes_de_compilar():
         json={"source": "x" * (MAX_SOURCE_BYTES + JSON_ENVELOPE_BYTES + 1)},
     )
     assert response.status_code == 413
-    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "tac_text", "symbols", "error"}
+    assert set(response.get_json()) == {"success", "diagnostics", "ast_svg", "tac_text", "symbols", "asm_text", "peephole", "error"}
     assert response.get_json()["tac_text"] is None
 
 

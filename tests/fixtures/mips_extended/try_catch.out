@@ -1,0 +1,9 @@
+sin error
+capturado: indice fuera de rango
+interno: indice fuera de rango
+externo: division entre cero
+no se imprime si falla
+3
+propagado: indice fuera de rango
+objeto: acceso a null
+fin
