@@ -21,12 +21,16 @@ SIGNATURES = MappingProxyType({
     # carga y movimiento
     "li": (("r", "i"),), "la": (("r", "l"),), "move": (("r", "r"),),
     "lw": (("r", "m"),), "sw": (("r", "m"),), "lb": (("r", "m"),), "lbu": (("r", "m"),), "sb": (("r", "m"),),
-    # aritmetica y logica
+    # aritmetica y logica. addu/subu/addiu no hacen trap por overflow: el lowering core los usa
+    # para que integer sea aritmetica de 32 bits en complemento a dos (desborda dando la vuelta)
     "add": _THREE_REGS, "sub": _THREE_REGS, "mul": _THREE_REGS, "div": _THREE_REGS, "rem": _THREE_REGS,
+    "addu": _THREE_REGS, "subu": _THREE_REGS,
     "and": _THREE_REGS, "or": _THREE_REGS, "xor": _THREE_REGS,
-    "addi": _REG_REG_IMM, "andi": _REG_REG_IMM, "ori": _REG_REG_IMM, "xori": _REG_REG_IMM,
+    "addi": _REG_REG_IMM, "addiu": _REG_REG_IMM, "andi": _REG_REG_IMM, "ori": _REG_REG_IMM, "xori": _REG_REG_IMM,
     "sll": _REG_REG_IMM, "srl": _REG_REG_IMM,
     "neg": (("r", "r"),), "not": (("r", "r"),),
+    # movimiento condicional (mips32): movz rd, rs, rt -> rd = rs si rt == 0. elige un valor sin saltar
+    "movz": _THREE_REGS, "movn": _THREE_REGS,
     # comparaciones que dejan 0/1
     "seq": _COMPARE, "sne": _COMPARE, "slt": _COMPARE, "sle": _COMPARE, "sgt": _COMPARE, "sge": _COMPARE,
     # saltos
